@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { api, type AuditEntry, type CertTokenAvailable, type Certification, type TokenRequest } from "@/lib/api";
-import { assignTokenTx, fetchTokenRequestDetailOnChain, mintTokensBatchTx, requestTokensTx, sha256FromText } from "@/lib/solanaProgram";
+import { assignTokenTx, fetchPersonRoleDataOnChain, fetchTokenRequestDetailOnChain, mintTokensBatchTx, requestTokensTx, sha256FromText } from "@/lib/solanaProgram";
 
 // ── Tipos de solapas ───────────────────────────────────────────────────────
 type Tab = "certificaciones" | "solicitudes" | "acciones" | "actividad";
@@ -432,7 +432,7 @@ function TabAcciones({
   const [mintQuantity, setMintQuantity] = useState("1");
   const [mintDetail, setMintDetail] = useState<TokenRequestDetail | null>(null);
 
-  const [assignToken, setAssignToken] = useState("");
+  const [institucionAsignadora, setInstitucionAsignadora] = useState("Universidad (sin nombre cargado)");
   const [nombre, setNombre] = useState("");
   const [apellido, setApellido] = useState("");
   const [dni, setDni] = useState("");
@@ -443,6 +443,40 @@ function TabAcciones({
   const [processingMsg, setProcessingMsg] = useState<string | null>(null);
 
   const approvedRequests = tokenRequests.filter((r) => r.estado === "Aprobada" && !!r.pubkey);
+  const nextAssignableToken = useMemo(
+    // getAvailableCertTokens viene ordenado DESC por timestamp; para FIFO tomamos el más antiguo.
+    () => (availableTokens.length > 0 ? availableTokens[availableTokens.length - 1] : null),
+    [availableTokens]
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadInstitucion = async () => {
+      try {
+        const roleDataOnChain = await fetchPersonRoleDataOnChain({ connection, wallet });
+        const roleData = (roleDataOnChain ?? "").trim();
+
+        if (roleData) {
+          if (!cancelled) setInstitucionAsignadora(roleData);
+          return;
+        }
+
+        const person = await api.getPerson(wallet.toBase58());
+        const roleDataDb = (person.data.role_data ?? "").trim();
+        if (!cancelled) {
+          setInstitucionAsignadora(roleDataDb || "Universidad (sin nombre cargado)");
+        }
+      } catch {
+        if (!cancelled) setInstitucionAsignadora("Universidad (sin nombre cargado)");
+      }
+    };
+
+    loadInstitucion();
+    return () => {
+      cancelled = true;
+    };
+  }, [connection, wallet]);
 
   const handleReloadTokens = async () => {
     setReloadingTokens(true);
@@ -721,24 +755,14 @@ function TabAcciones({
           <div className="text-xs font-medium text-gray-600 mb-2">
             Tokens acuñados disponibles: <span className="text-base font-bold text-primary">{availableTokens.length}</span>
           </div>
+          <div className="text-xs text-gray-600 mb-2">
+            Institución: <span className="font-semibold text-primary">{institucionAsignadora}</span>
+          </div>
           {availableTokens.length === 0 ? (
             <div className="text-xs text-gray-500 italic">No hay tokens disponibles. Acuña uno primero en la sección anterior.</div>
           ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {availableTokens.map((t) => (
-                <div
-                  key={t.cert_token_pubkey}
-                  onClick={() => setAssignToken(t.cert_token_pubkey)}
-                  className={`p-2 rounded border cursor-pointer transition-colors ${
-                    assignToken === t.cert_token_pubkey
-                      ? "border-primary bg-blue-50"
-                      : "border-gray-300 bg-white hover:bg-gray-50"
-                  }`}
-                >
-                  <div className="font-mono text-xs font-medium">{shortKey(t.cert_token_pubkey)}</div>
-                  <div className="text-xs text-gray-500">{new Date(t.timestamp * 1000).toLocaleString('es-AR', { dateStyle: 'short', timeStyle: 'short' })}</div>
-                </div>
-              ))}
+            <div className="text-xs text-gray-700">
+              Asignación automática: se utilizará el próximo token disponible (FIFO), sin selección manual.
             </div>
           )}
         </div>
@@ -750,14 +774,14 @@ function TabAcciones({
         </div>
         <button
           type="button"
-          disabled={busy || !assignToken}
+          disabled={busy || !nextAssignableToken}
           onClick={() => run(async () => {
             const hashDatos = await sha256FromText(JSON.stringify({ nombre, apellido, dni }));
             return assignTokenTx({
               connection,
               wallet: anchorWallet,
               universidad: wallet,
-              certToken: new PublicKey(assignToken),
+              certToken: new PublicKey(nextAssignableToken!.cert_token_pubkey),
               nombre,
               apellido,
               dni,
