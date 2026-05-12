@@ -6,6 +6,19 @@ import { PublicKey } from "@solana/web3.js";
 import { api, type AuditEntry, type CertTokenAvailable, type Certification, type TokenRequest } from "@/lib/api";
 import { assignTokenTx, fetchPersonRoleDataOnChain, fetchTokenRequestDetailOnChain, mintTokensBatchTx, requestTokensTx, sha256FromText } from "@/lib/solanaProgram";
 
+const PROGRAM_ID = new PublicKey(
+  process.env.NEXT_PUBLIC_PROGRAM_ID ?? "3A6PEQXB3UUrgNMEDnYYApx5B3jxwSfr7bTpjt5AEEpt"
+);
+
+function deriveTokenRequestPda(solicitante: PublicKey, id: bigint): PublicKey {
+  const idBytes = Buffer.alloc(8);
+  idBytes.writeBigUInt64LE(id);
+  return PublicKey.findProgramAddressSync(
+    [Buffer.from("token_request"), solicitante.toBuffer(), idBytes],
+    PROGRAM_ID
+  )[0];
+}
+
 // ── Tipos de solapas ───────────────────────────────────────────────────────
 type Tab = "certificaciones" | "solicitudes" | "acciones" | "actividad";
 
@@ -421,7 +434,7 @@ function TabAcciones({
   availableTokens: CertTokenAvailable[];
   onDone: () => Promise<void>;
 }) {
-  const [id, setId] = useState("1");
+  const [id, setId] = useState("");
   const [carrera, setCarrera] = useState("");
   const [plan, setPlan] = useState("");
   const [resolucion, setResolucion] = useState("");
@@ -567,6 +580,17 @@ function TabAcciones({
     }
   };
 
+  const findAvailableRequestId = async (baseId: bigint): Promise<bigint> => {
+    let candidate = baseId;
+    for (let tries = 0; tries < 100; tries++) {
+      const pda = deriveTokenRequestPda(wallet, candidate);
+      const exists = await (connection as any).getAccountInfo(pda, "confirmed");
+      if (!exists) return candidate;
+      candidate += 1n;
+    }
+    throw new Error("No se pudo encontrar un ID libre para la solicitud de tokens");
+  };
+
   const runMultipleMints = async () => {
     if (!mintTarget || !mintDetail) return;
     
@@ -661,7 +685,7 @@ function TabAcciones({
       <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
         <h3 className="font-semibold text-primary">1) Solicitar tokens</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          <input value={id} onChange={(e) => setId(e.target.value)} placeholder="ID (u64)" className="rounded-md border px-3 py-2 text-sm" />
+          <input value={id} onChange={(e) => setId(e.target.value)} placeholder="ID (u64, opcional)" className="rounded-md border px-3 py-2 text-sm" />
           <input value={carrera} onChange={(e) => setCarrera(e.target.value)} placeholder="Carrera" className="rounded-md border px-3 py-2 text-sm" />
           <input value={plan} onChange={(e) => setPlan(e.target.value)} placeholder="Plan" className="rounded-md border px-3 py-2 text-sm" />
           <input value={resolucion} onChange={(e) => setResolucion(e.target.value)} placeholder="Resolución" className="rounded-md border px-3 py-2 text-sm" />
@@ -671,17 +695,27 @@ function TabAcciones({
         <button
           type="button"
           disabled={busy}
-          onClick={() => run(() => requestTokensTx({
-            connection,
-            wallet: anchorWallet,
-            solicitante: wallet,
-            id: BigInt(id),
-            carrera,
-            plan,
-            resolucion,
-            anioEgreso: Number(anio),
-            cantidad: Number(cantidad),
-          }))}
+          onClick={() => run(async () => {
+            const raw = id.trim();
+            const baseId = raw.length > 0 ? BigInt(raw) : BigInt(Date.now());
+            const safeId = await findAvailableRequestId(baseId);
+
+            const sig = await requestTokensTx({
+              connection,
+              wallet: anchorWallet,
+              solicitante: wallet,
+              id: safeId,
+              carrera,
+              plan,
+              resolucion,
+              anioEgreso: Number(anio),
+              cantidad: Number(cantidad),
+            });
+
+            // Pre-cargar un próximo id sugerido para evitar colisiones en solicitudes consecutivas
+            setId((safeId + 1n).toString());
+            return sig;
+          })}
           className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
         >
           Enviar solicitud
