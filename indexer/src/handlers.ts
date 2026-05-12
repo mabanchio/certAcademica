@@ -163,13 +163,17 @@ export function handleEvent(name: string, data: any, signature: string): void {
     case "TokenAssignedEvent":
       db.prepare(`
         INSERT OR REPLACE INTO certifications
-          (pubkey, cert_token, universidad, carrera, estado, updated_at)
-        VALUES (?, ?, ?, ?, 'Activa', ?)
+          (pubkey, cert_token, universidad, carrera, nombre, apellido, dni, anio_egreso, estado, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Activa', ?)
       `).run(
         pk(data.certification),
         pk(data.certToken),
         pk(data.universidad),
         data.carrera,
+        data.nombre,
+        data.apellido,
+        data.dni,
+        data.anio_egreso,
         ts(data.timestamp)
       );
       break;

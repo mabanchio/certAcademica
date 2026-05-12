@@ -566,9 +566,9 @@ pub mod academic_certification {
 
         let cert = &mut ctx.accounts.certification;
         cert.cert_token = ctx.accounts.cert_token.key();
-        cert.nombre = nombre;
-        cert.apellido = apellido;
-        cert.dni = dni;
+        cert.nombre = nombre.clone();
+        cert.apellido = apellido.clone();
+        cert.dni = dni.clone();
         cert.carrera = carrera.clone();
         cert.anio_egreso = anio_egreso;
         cert.universidad = universidad;
@@ -586,6 +586,10 @@ pub mod academic_certification {
             cert_token: cert_token_key,
             universidad,
             carrera,
+            nombre,
+            apellido,
+            dni,
+            anio_egreso,
             timestamp: now_assign,
         });
 
@@ -1578,6 +1582,10 @@ pub struct TokenAssignedEvent {
     pub cert_token: Pubkey,
     pub universidad: Pubkey,
     pub carrera: String,
+    pub nombre: String,
+    pub apellido: String,
+    pub dni: String,
+    pub anio_egreso: u16,
     pub timestamp: i64,
 }
 
