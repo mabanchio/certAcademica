@@ -140,9 +140,11 @@ export function updatePersonIdentity(wallet: string, nombre?: string, apellido?:
 
 // DNI se omite en listados. Se expone solo en /verify (verificación explícita).
 function sanitizeCertification(row: Record<string, unknown>, includeDni = false): CertificationRow {
+  const rawCertToken = row.cert_token as string | null;
   return {
     pubkey: row.pubkey as string,
-    cert_token: row.cert_token as string | null,
+    // "undefined" se almacenó como literal de string cuando el evento antiguo no tenía certToken
+    cert_token: rawCertToken === "undefined" ? null : rawCertToken,
     nombre: row.nombre as string | null,
     apellido: row.apellido as string | null,
     carrera: row.carrera as string | null,
@@ -284,6 +286,7 @@ export interface VerifyResult {
   auditHistory: AuditRow[];
   blockchainVerified: boolean;
   validationErrors: string[];
+  universidadNombre: string | null;
 }
 
 export async function verifyCertification(pubkey: string, expectedHash?: string): Promise<VerifyResult> {
@@ -295,6 +298,7 @@ export async function verifyCertification(pubkey: string, expectedHash?: string)
       auditHistory: [],
       blockchainVerified: false,
       validationErrors: ["La certificación no existe en la base indexada"],
+      universidadNombre: null,
     };
   }
 
@@ -352,12 +356,24 @@ export async function verifyCertification(pubkey: string, expectedHash?: string)
 
   const blockchainVerified = validationErrors.length === 0;
 
+  // Resolver nombre de la universidad (el campo universidad es la wallet pubkey)
+  let universidadNombre: string | null = null;
+  if (cert.universidad) {
+    const uniPerson = getDb()
+      .prepare("SELECT nombre, apellido FROM persons WHERE wallet = ?")
+      .get(cert.universidad) as { nombre: string | null; apellido: string | null } | undefined;
+    if (uniPerson?.nombre) {
+      universidadNombre = [uniPerson.nombre, uniPerson.apellido].filter(Boolean).join(" ");
+    }
+  }
+
   return {
     valid: cert.estado === "Activa" && blockchainVerified,
     certification: cert,
     auditHistory,
     blockchainVerified,
     validationErrors,
+    universidadNombre,
   };
 }
 

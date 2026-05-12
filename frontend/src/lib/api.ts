@@ -71,6 +71,7 @@ export interface VerifyResult {
   auditHistory: AuditEntry[];
   blockchainVerified: boolean;
   validationErrors: string[];
+  universidadNombre: string | null;
 }
 
 export interface EventRow {

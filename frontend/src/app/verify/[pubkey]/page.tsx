@@ -87,7 +87,7 @@ export default function VerifyPage({ params }: { params: { pubkey: string } }) {
               </Field>
               <Field
                 label="Institución"
-                value={result.certification.universidad ?? undefined}
+                value={result.universidadNombre ?? result.certification.universidad ?? undefined}
               />
             </div>
           )}
@@ -119,7 +119,13 @@ export default function VerifyPage({ params }: { params: { pubkey: string } }) {
                         <td className="px-4 py-3 font-mono text-xs text-gray-500">
                           {e.actor.slice(0, 12)}…
                         </td>
-                        <td className="px-4 py-3 text-gray-600">{e.motivo || "—"}</td>
+                        <td className="px-4 py-3 text-gray-600">
+                          {e.motivo
+                            ? e.motivo
+                            : e.accion === "AssignToken"
+                            ? "Emisión de certificación"
+                            : "—"}
+                        </td>
                         <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                           {new Date(e.timestamp * 1000).toLocaleString("es-AR")}
                         </td>
