@@ -87,7 +87,7 @@ export default function VerifyPage({ params }: { params: { pubkey: string } }) {
               </Field>
               <Field
                 label="Institución"
-                value={result.universidadNombre ?? result.certification.universidad ?? undefined}
+                value={result.universidadNombre ?? "Universidad (nombre no especificado)"}
               />
             </div>
           )}

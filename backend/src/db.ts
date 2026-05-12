@@ -356,14 +356,22 @@ export async function verifyCertification(pubkey: string, expectedHash?: string)
 
   const blockchainVerified = validationErrors.length === 0;
 
-  // Resolver nombre de la universidad (el campo universidad es la wallet pubkey)
+  // Resolver nombre institucional de la universidad emisora.
+  // Se prioriza role_data (referencia institucional) y no el nombre/apellido personal.
   let universidadNombre: string | null = null;
   if (cert.universidad) {
     const uniPerson = getDb()
-      .prepare("SELECT nombre, apellido FROM persons WHERE wallet = ?")
-      .get(cert.universidad) as { nombre: string | null; apellido: string | null } | undefined;
-    if (uniPerson?.nombre) {
-      universidadNombre = [uniPerson.nombre, uniPerson.apellido].filter(Boolean).join(" ");
+      .prepare("SELECT roles, role_data FROM persons WHERE wallet = ?")
+      .get(cert.universidad) as { roles: string | null; role_data: string | null } | undefined;
+
+    const roleData = (uniPerson?.role_data ?? "").trim();
+    const roles = uniPerson?.roles ?? "[]";
+    const isUniversidad = roles.includes("Universidad");
+
+    if (roleData) {
+      universidadNombre = roleData;
+    } else if (isUniversidad) {
+      universidadNombre = null;
     }
   }
 
