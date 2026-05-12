@@ -68,10 +68,11 @@ export function RoleRequestPanel() {
 
     const refresh = async () => {
       try {
-        const pending = await getPendingRolesForWallet(wallet);
+        const roleEvents = await fetchRoleEventsForWallet(wallet);
+        const pending = getPendingRolesFromEvents(wallet, roleEvents);
         if (active) setPendingRoles(pending);
 
-        const rejected = await getLatestRejectedRoleForWallet(wallet);
+        const rejected = getLatestRejectedRoleFromEvents(wallet, roleEvents);
         if (active) setRejectedInfo(rejected);
       } catch {
         // Mantiene el estado actual para evitar mostrar el formulario por un fallo transitorio.
@@ -79,7 +80,7 @@ export function RoleRequestPanel() {
     };
 
     refresh();
-    const timer = setInterval(refresh, 12000);
+    const timer = setInterval(refresh, 30000);
 
     return () => {
       active = false;
@@ -297,17 +298,32 @@ export function RoleRequestPanel() {
   );
 }
 
-async function getPendingRolesForWallet(wallet: string): Promise<RequestableRole[]> {
+type RoleEvents = {
+  requested: EventRow[];
+  approved: EventRow[];
+  rejected: EventRow[];
+};
+
+async function fetchRoleEventsForWallet(_wallet: string): Promise<RoleEvents> {
   const [requested, approved, rejected] = await Promise.all([
     api.getTransactions(500, 0, "RoleRequestedEvent"),
     api.getTransactions(500, 0, "RoleApprovedEvent"),
     api.getTransactions(500, 0, "RoleRejectedEvent"),
   ]);
 
+  return {
+    requested: requested.data,
+    approved: approved.data,
+    rejected: rejected.data,
+  };
+}
+
+function getPendingRolesFromEvents(wallet: string, events: RoleEvents): RequestableRole[] {
+
   const requestedByRole = new Set<RequestableRole>();
   const resolvedByRole = new Set<RequestableRole>();
 
-  for (const row of requested.data) {
+  for (const row of events.requested) {
     const d = parseData(row);
     const requester = typeof d.requester === "string" ? d.requester : "";
     if (requester !== wallet) continue;
@@ -315,7 +331,7 @@ async function getPendingRolesForWallet(wallet: string): Promise<RequestableRole
     if (role) requestedByRole.add(role);
   }
 
-  for (const row of approved.data) {
+  for (const row of events.approved) {
     const d = parseData(row);
     const requester = typeof d.requester === "string" ? d.requester : "";
     if (requester !== wallet) continue;
@@ -323,7 +339,7 @@ async function getPendingRolesForWallet(wallet: string): Promise<RequestableRole
     if (role) resolvedByRole.add(role);
   }
 
-  for (const row of rejected.data) {
+  for (const row of events.rejected) {
     const d = parseData(row);
     const requester = typeof d.requester === "string" ? d.requester : "";
     if (requester !== wallet) continue;
@@ -335,16 +351,10 @@ async function getPendingRolesForWallet(wallet: string): Promise<RequestableRole
   return priority.filter((role) => requestedByRole.has(role) && !resolvedByRole.has(role));
 }
 
-async function getLatestRejectedRoleForWallet(wallet: string): Promise<RejectedRoleInfo | null> {
-  const [requested, approved, rejected] = await Promise.all([
-    api.getTransactions(500, 0, "RoleRequestedEvent"),
-    api.getTransactions(500, 0, "RoleApprovedEvent"),
-    api.getTransactions(500, 0, "RoleRejectedEvent"),
-  ]);
-
+function getLatestRejectedRoleFromEvents(wallet: string, events: RoleEvents): RejectedRoleInfo | null {
   const latestByRole = new Map<RequestableRole, { kind: "requested" | "approved" | "rejected"; slot: number; reason?: string }>();
 
-  for (const row of requested.data) {
+  for (const row of events.requested) {
     const d = parseData(row);
     const requester = typeof d.requester === "string" ? d.requester : "";
     if (requester !== wallet) continue;
@@ -356,7 +366,7 @@ async function getLatestRejectedRoleForWallet(wallet: string): Promise<RejectedR
     }
   }
 
-  for (const row of approved.data) {
+  for (const row of events.approved) {
     const d = parseData(row);
     const requester = typeof d.requester === "string" ? d.requester : "";
     if (requester !== wallet) continue;
@@ -368,7 +378,7 @@ async function getLatestRejectedRoleForWallet(wallet: string): Promise<RejectedR
     }
   }
 
-  for (const row of rejected.data) {
+  for (const row of events.rejected) {
     const d = parseData(row);
     const requester = typeof d.requester === "string" ? d.requester : "";
     if (requester !== wallet) continue;

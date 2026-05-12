@@ -3,8 +3,17 @@
 const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? "GET").toUpperCase();
+  const defaultHeaders: Record<string, string> =
+    method === "GET" || method === "HEAD"
+      ? {}
+      : { "Content-Type": "application/json" };
+
   const res = await fetch(`${BASE}${path}`, {
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      ...defaultHeaders,
+      ...(init?.headers as Record<string, string> | undefined),
+    },
     ...init,
   });
   if (!res.ok) {
