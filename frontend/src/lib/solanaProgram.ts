@@ -929,13 +929,14 @@ export async function assignTokenTx(params: {
   connection: unknown;
   wallet: unknown;
   universidad: PublicKey;
+  tokenRequest: PublicKey;
   certToken: PublicKey;
   nombre: string;
   apellido: string;
   dni: string;
   hashDatos: Uint8Array;
 }): Promise<string> {
-  const { connection, wallet, universidad, certToken, nombre, apellido, dni, hashDatos } = params;
+  const { connection, wallet, universidad, tokenRequest, certToken, nombre, apellido, dni, hashDatos } = params;
   const program = buildProgram(connection, wallet);
   const certification = certificationPda(certToken);
 
@@ -945,6 +946,7 @@ export async function assignTokenTx(params: {
       .accounts({
         universidadPerson: personPda(universidad),
         certToken,
+        tokenRequest,
         certification,
         universidad,
         systemProgram: SystemProgram.programId,

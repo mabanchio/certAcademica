@@ -33,11 +33,10 @@ export interface Certification {
   nombre: string | null;
   apellido: string | null;
   carrera: string | null;
-  /** Wallet de la universidad emisora */
-  universidad_wallet: string;
-  status: string;
   anio_egreso: number | null;
-  promedio: number | null;
+  /** Wallet de la universidad emisora */
+  universidad: string | null;
+  estado: string | null;
   hash_datos: string | null;
   motivo_revocacion: string | null;
   updated_at: number | null;

@@ -121,7 +121,7 @@ function TabCertificaciones({ certs }: { certs: Certification[] }) {
           <DetailRow label="Titular" value={`${selected.nombre ?? ""} ${selected.apellido ?? ""}`} />
           <DetailRow label="Carrera" value={selected.carrera} />
           <DetailRow label="Año de egreso" value={selected.anio_egreso} />
-          <DetailRow label="Estado" value={<EstadoChip estado={selected.status} />} />
+          <DetailRow label="Estado" value={<EstadoChip estado={selected.estado} />} />
           <DetailRow label="Token cert." value={selected.cert_token ? shortKey(selected.cert_token) : null} />
           <DetailRow label="Pubkey" value={<span className="font-mono text-xs">{selected.pubkey}</span>} />
           {selected.motivo_revocacion && (
@@ -162,7 +162,7 @@ function TabCertificaciones({ certs }: { certs: Certification[] }) {
                   <td className="px-4 py-3 font-medium">{c.nombre} {c.apellido}</td>
                   <td className="px-4 py-3 text-gray-600">{c.carrera ?? "—"}</td>
                   <td className="px-4 py-3 text-gray-600">{c.anio_egreso ?? "—"}</td>
-                  <td className="px-4 py-3"><EstadoChip estado={c.status} /></td>
+                  <td className="px-4 py-3"><EstadoChip estado={c.estado} /></td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmt(c.updated_at)}</td>
                   <td className="px-4 py-3">
                     <button

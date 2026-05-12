@@ -40,6 +40,7 @@ export interface CertificationRow {
   nombre: string | null;
   apellido: string | null;
   carrera: string | null;
+  anio_egreso: number | null;
   universidad: string | null;
   estado: string | null;
   hash_datos: string | null;
@@ -145,6 +146,7 @@ function sanitizeCertification(row: Record<string, unknown>, includeDni = false)
     nombre: row.nombre as string | null,
     apellido: row.apellido as string | null,
     carrera: row.carrera as string | null,
+    anio_egreso: row.anio_egreso as number | null,
     universidad: row.universidad as string | null,
     estado: row.estado as string | null,
     hash_datos: row.hash_datos as string | null,

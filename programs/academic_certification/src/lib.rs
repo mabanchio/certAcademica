@@ -549,10 +549,14 @@ pub mod academic_certification {
 
         let carrera;
         let universidad;
+        let anio_egreso;
         {
             let token = &ctx.accounts.cert_token;
             carrera = token.carrera.clone();
             universidad = token.universidad;
+            
+            let tr = &ctx.accounts.token_request;
+            anio_egreso = tr.anio_egreso;
         }
 
         {
@@ -566,6 +570,7 @@ pub mod academic_certification {
         cert.apellido = apellido;
         cert.dni = dni;
         cert.carrera = carrera.clone();
+        cert.anio_egreso = anio_egreso;
         cert.universidad = universidad;
         cert.estado = CertificationStatus::Activa;
         cert.hash_datos = hash_datos;
@@ -1190,6 +1195,9 @@ pub struct AssignToken<'info> {
     )]
     pub cert_token: Account<'info, CertificationToken>,
 
+    #[account()]
+    pub token_request: Account<'info, TokenRequest>,
+
     #[account(
         init,
         payer = universidad,
@@ -1529,6 +1537,7 @@ pub struct Certification {
     pub apellido: String,
     pub dni: String,
     pub carrera: String,
+    pub anio_egreso: u16,
     pub universidad: Pubkey,
     pub estado: CertificationStatus,
     pub hash_datos: [u8; 32],
@@ -1549,6 +1558,7 @@ impl Certification {
         + (4 + Self::MAX_APELLIDO)
         + (4 + Self::MAX_DNI)
         + (4 + Self::MAX_CARRERA)
+        + 2                           // anio_egreso
         + 32                          // universidad
         + 1                           // estado
         + 32                          // hash_datos

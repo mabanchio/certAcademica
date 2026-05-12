@@ -588,6 +588,7 @@ export default function MinisterioDashboard() {
         connection,
         wallet: anchorWallet,
         universidad: ministerioPk,
+        tokenRequest,
         certToken,
         nombre: requesterNombre,
         apellido: requesterApellido,
