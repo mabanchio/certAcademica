@@ -929,16 +929,23 @@ export async function assignTokenTx(params: {
   connection: unknown;
   wallet: unknown;
   universidad: PublicKey;
-  tokenRequest: PublicKey;
+  tokenRequest?: PublicKey;
   certToken: PublicKey;
   nombre: string;
   apellido: string;
   dni: string;
   hashDatos: Uint8Array;
 }): Promise<string> {
-  const { connection, wallet, universidad, tokenRequest, certToken, nombre, apellido, dni, hashDatos } = params;
+  const { connection, wallet, universidad, certToken, nombre, apellido, dni, hashDatos } = params;
   const program = buildProgram(connection, wallet);
   const certification = certificationPda(certToken);
+
+  // Compatibilidad: si la UI no pasa tokenRequest, se obtiene desde la cuenta CertificationToken.
+  let tokenRequest = params.tokenRequest;
+  if (!tokenRequest) {
+    const tokenAccount = await (program as any).account.certificationToken.fetch(certToken);
+    tokenRequest = new PublicKey(tokenAccount.tokenRequest);
+  }
 
   return rpcWithExtendedTimeout(connection, () =>
     (program as any).methods

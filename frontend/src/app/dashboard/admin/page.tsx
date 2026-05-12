@@ -504,9 +504,9 @@ export default function AdminDashboard() {
                 <tr key={c.pubkey} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-mono text-xs" title={c.pubkey}>{shortAddress(c.pubkey)}</td>
                   <td className="px-4 py-3">{c.nombre ?? ""} {c.apellido ?? ""}</td>
-                  <td className="px-4 py-3"><StatusChip status={c.status} /></td>
+                  <td className="px-4 py-3"><StatusChip status={c.estado ?? ""} /></td>
                   <td className="px-4 py-3">
-                    {c.status === "Revocada" ? (
+                    {c.estado === "Revocada" ? (
                       <span className="text-xs text-gray-500">Ya revocada</span>
                     ) : (
                       <button

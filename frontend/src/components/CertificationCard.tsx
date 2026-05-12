@@ -19,24 +19,18 @@ export function CertificationCard({ cert, showQR = false }: Props) {
           </p>
           <p className="text-sm text-gray-500">{cert.carrera}</p>
         </div>
-        <StatusChip status={cert.status} />
+        <StatusChip status={cert.estado ?? ""} />
       </div>
 
       <div className="text-xs text-gray-500 space-y-1">
         <p>
           <span className="font-medium text-gray-700">Universidad:</span>{" "}
-          {cert.universidad_wallet.slice(0, 8)}…
+          {cert.universidad ? `${cert.universidad.slice(0, 8)}…` : "—"}
         </p>
         {cert.anio_egreso && (
           <p>
             <span className="font-medium text-gray-700">Año de egreso:</span>{" "}
             {cert.anio_egreso}
-          </p>
-        )}
-        {cert.promedio && (
-          <p>
-            <span className="font-medium text-gray-700">Promedio:</span>{" "}
-            {cert.promedio}
           </p>
         )}
       </div>
@@ -48,7 +42,7 @@ export function CertificationCard({ cert, showQR = false }: Props) {
         {cert.pubkey.slice(0, 12)}…
       </a>
 
-      {showQR && cert.status === "Activo" && (
+      {showQR && cert.estado === "Activa" && (
         <div className="mt-2 flex justify-center">
           <QRCodeDisplay value={verifyUrl} size={140} label="Escanear para verificar" />
         </div>
