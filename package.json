@@ -1,0 +1,29 @@
+{
+  "name": "academic-certification-tests",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "setup": "npx ts-node scripts/setup-localnet.ts",
+    "stop": "node scripts/stop-all.js",
+    "test": "anchor test",
+    "test:skip-deploy": "anchor test --skip-deploy",
+    "deploy:program:devnet": "anchor build && anchor deploy --provider.cluster devnet",
+    "deploy:program:testnet": "anchor build && anchor deploy --provider.cluster https://api.testnet.solana.com",
+    "deploy:program:mainnet": "anchor build && anchor deploy --provider.cluster mainnet",
+    "build:stack": "npm --prefix backend run build && npm --prefix indexer run build && npm --prefix frontend run build",
+    "check:stack": "npm --prefix backend test && npm test"
+  },
+  "devDependencies": {
+    "@coral-xyz/anchor": "^0.30.1",
+    "@solana/web3.js": "^1.95.3",
+    "@types/chai": "^4.3.16",
+    "@types/mocha": "^10.0.7",
+    "chai": "^4.5.0",
+    "mocha": "^10.7.0",
+    "ts-mocha": "^10.0.0",
+    "typescript": "^5.5.0"
+  },
+  "dependencies": {
+    "http-proxy": "^1.18.1"
+  }
+}

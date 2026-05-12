@@ -1,0 +1,21 @@
+[package]
+name = "academic_certification"
+version = "0.1.0"
+description = "Fase 1 core del sistema de certificacion academica"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "academic_certification"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idc = []
+idl-build = ["anchor-lang/idl-build"]
+
+[dependencies]
+anchor-lang = { workspace = true, features = ["init-if-needed"] }

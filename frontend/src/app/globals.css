@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap");
+
+:root {
+  --color-primary: #0A2540;
+  --color-accent: #2D9CDB;
+}
+
+body {
+  @apply bg-gray-50 text-gray-900 font-sans;
+}
+
+/* Overrides para Solana Wallet Adapter */
+.wallet-adapter-button {
+  @apply !bg-accent !text-white !rounded-lg !font-semibold !px-5 !py-2 hover:!opacity-90 transition-opacity;
+}
+.wallet-adapter-modal-wrapper {
+  @apply !bg-primary;
+}

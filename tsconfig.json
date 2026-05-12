@@ -1,0 +1,18 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "CommonJS",
+    "moduleResolution": "node",
+    "lib": ["ES2022"],
+    "strict": false,
+    "esModuleInterop": true,
+    "resolveJsonModule": true,
+    "skipLibCheck": true,
+    "outDir": "target/types",
+    "rootDir": "tests",
+    "baseUrl": ".",
+    "noImplicitAny": false
+  },
+  "include": ["tests/**/*.ts"],
+  "exclude": ["node_modules", "target", "backend", "frontend", "indexer"]
+}
