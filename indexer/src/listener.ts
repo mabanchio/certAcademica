@@ -42,6 +42,7 @@ export class Listener {
     console.log(`[Listener] Conectando a ${config.rpcUrl} | programa ${config.programId}`);
     await this.bootstrapAdminFromConfig();
     await this.bootstrapPersonsFromChain();
+    await this.bootstrapCertificationsFromChain();
     await this.syncHistorical();
     this.subscribeWs();
     this.startPollFallback();
@@ -164,6 +165,68 @@ export class Listener {
       console.log(`[Listener] Bootstrap de persons desde on-chain: ${count} cuenta(s).`);
     } catch (err) {
       console.warn("[Listener] No se pudo bootstrapear persons desde on-chain:", err);
+    }
+  }
+
+  private async bootstrapCertificationsFromChain(): Promise<void> {
+    try {
+      const db = getDb();
+      const accounts = await this.connection.getProgramAccounts(PROGRAM_ID, { commitment: "confirmed" });
+      const now = Date.now();
+      let count = 0;
+
+      for (const acc of accounts) {
+        try {
+          const cert = this.coder.accounts.decode("Certification", acc.account.data) as {
+            certToken?: unknown;
+            nombre?: string;
+            apellido?: string;
+            dni?: string;
+            carrera?: string;
+            anioEgreso?: number;
+            universidad?: unknown;
+            estado?: unknown;
+            hashDatos?: number[] | Uint8Array;
+            motivoRevocacion?: string;
+            bump?: number;
+          };
+
+          const certToken = this.asBase58(cert.certToken);
+          const universidad = this.asBase58(cert.universidad);
+          if (!certToken || !universidad) continue;
+
+          const estado = this.enumName(cert.estado);
+          const hashDatos = cert.hashDatos
+            ? Buffer.from(cert.hashDatos as number[]).toString("hex")
+            : null;
+
+          db.prepare(`
+            INSERT OR REPLACE INTO certifications
+              (pubkey, cert_token, nombre, apellido, dni, carrera, anio_egreso, universidad, estado, hash_datos, motivo_revocacion, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          `).run(
+            acc.pubkey.toBase58(),
+            certToken,
+            cert.nombre ?? null,
+            cert.apellido ?? null,
+            cert.dni ?? null,
+            cert.carrera ?? null,
+            cert.anioEgreso ?? null,
+            universidad,
+            estado || null,
+            hashDatos,
+            cert.motivoRevocacion ?? null,
+            now
+          );
+          count++;
+        } catch {
+          // No era una Certification, se ignora.
+        }
+      }
+
+      console.log(`[Listener] Bootstrap de certifications desde on-chain: ${count} cuenta(s).`);
+    } catch (err) {
+      console.warn("[Listener] No se pudo bootstrapear certifications desde on-chain:", err);
     }
   }
 

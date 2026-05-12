@@ -314,30 +314,36 @@ export async function verifyCertification(pubkey: string, expectedHash?: string)
     if (!onChain) {
       validationErrors.push("La cuenta no existe on-chain o no pertenece al programa");
     } else {
-      if (cert.cert_token !== onChain.certToken) {
+      if (cert.cert_token !== null && cert.cert_token !== onChain.certToken) {
         validationErrors.push("El token asociado no coincide con el registro on-chain");
       }
-      if (cert.nombre !== onChain.nombre) {
+      if (cert.nombre !== null && cert.nombre !== onChain.nombre) {
         validationErrors.push("El nombre no coincide con el registro on-chain");
       }
-      if (cert.apellido !== onChain.apellido) {
+      if (cert.apellido !== null && cert.apellido !== onChain.apellido) {
         validationErrors.push("El apellido no coincide con el registro on-chain");
       }
-      if (cert.carrera !== onChain.carrera) {
+      if (cert.carrera !== null && cert.carrera !== onChain.carrera) {
         validationErrors.push("La carrera no coincide con el registro on-chain");
       }
-      if (cert.universidad !== onChain.universidad) {
+      if (cert.universidad !== null && cert.universidad !== onChain.universidad) {
         validationErrors.push("La institución no coincide con el registro on-chain");
       }
-      if (cert.estado !== onChain.estado) {
+      if (cert.estado !== null && cert.estado !== onChain.estado) {
         validationErrors.push("El estado no coincide con el registro on-chain");
       }
-      if ((cert.hash_datos ?? "").toLowerCase() !== onChain.hashDatos.toLowerCase()) {
+      if (cert.hash_datos !== null && (cert.hash_datos ?? "").toLowerCase() !== onChain.hashDatos.toLowerCase()) {
         validationErrors.push("El hash de datos no coincide con el registro on-chain");
       }
       if ((cert.motivo_revocacion ?? "") !== onChain.motivoRevocacion) {
         validationErrors.push("El motivo de revocación no coincide con el registro on-chain");
       }
+
+      // Enriquecer con datos on-chain cuando la DB tiene valores null (cert indexada pre-actualización)
+      if (!cert.nombre) cert.nombre = onChain.nombre;
+      if (!cert.apellido) cert.apellido = onChain.apellido;
+      if (!cert.cert_token) cert.cert_token = onChain.certToken;
+      if (!cert.anio_egreso) cert.anio_egreso = onChain.anioEgreso;
     }
   } catch (error) {
     const msg = error instanceof Error ? error.message : "Error desconocido consultando Solana";

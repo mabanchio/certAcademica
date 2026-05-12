@@ -13,6 +13,7 @@ export interface OnChainCertification {
   apellido: string;
   dni: string;
   carrera: string;
+  anioEgreso: number;
   universidad: string;
   estado: "Activa" | "Revocada";
   hashDatos: string;
@@ -94,6 +95,8 @@ export async function fetchOnChainCertification(
   [apellido, offset] = readString(data, offset);
   [dni, offset] = readString(data, offset);
   [carrera, offset] = readString(data, offset);
+  const anioEgreso = data.readUInt16LE(offset);
+  offset += 2;
   [universidad, offset] = readPubkey(data, offset);
 
   const estadoRaw = data.readUInt8(offset);
@@ -113,6 +116,7 @@ export async function fetchOnChainCertification(
     apellido,
     dni,
     carrera,
+    anioEgreso,
     universidad,
     estado: estadoRaw === 0 ? "Activa" : "Revocada",
     hashDatos,

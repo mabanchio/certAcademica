@@ -129,4 +129,8 @@ function migrate(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_audit_entidad ON audit_entries(entidad);
     CREATE INDEX IF NOT EXISTS idx_audit_ts      ON audit_entries(timestamp);
   `);
+
+  // Migraciones incrementales (columnas añadidas después del schema inicial)
+  const addColIfMissing = (sql: string) => { try { db.exec(sql); } catch { /* ya existe */ } };
+  addColIfMissing("ALTER TABLE certifications ADD COLUMN anio_egreso INTEGER");
 }
