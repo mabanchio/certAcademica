@@ -1,7 +1,7 @@
 "use client";
 
 import { AnchorProvider, BN, Program } from "@coral-xyz/anchor";
-import { Connection, PublicKey, SystemProgram } from "@solana/web3.js";
+import { ComputeBudgetProgram, Connection, PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 
 export type RequestableRole = "Universidad" | "Ministerio" | "Cancilleria" | "Egresado";
 export type EditableRole = "Universidad" | "Ministerio" | "Cancilleria" | "Egresado";
@@ -922,6 +922,49 @@ export async function mintTokenTx(params: {
         systemProgram: SystemProgram.programId,
       })
       .rpc()
+  );
+}
+
+export async function mintTokensBatchTx(params: {
+  connection: unknown;
+  wallet: unknown;
+  universidad: PublicKey;
+  tokenRequest: PublicKey;
+  indexes: number[];
+}): Promise<string> {
+  const { connection, wallet, universidad, tokenRequest, indexes } = params;
+
+  if (!Array.isArray(indexes) || indexes.length === 0) {
+    throw new Error("Debes indicar al menos un índice para acuñar.");
+  }
+  if (indexes.length > 10) {
+    throw new Error("Cada transacción de acuñación permite hasta 10 tokens.");
+  }
+
+  const program = buildProgram(connection, wallet);
+  const ixs = await Promise.all(
+    indexes.map((index) =>
+      (program as any).methods
+        .mintToken(index)
+        .accounts({
+          universidadPerson: personPda(universidad),
+          tokenRequest,
+          certToken: certTokenPda(tokenRequest, index),
+          universidad,
+          systemProgram: SystemProgram.programId,
+        })
+        .instruction()
+    )
+  );
+
+  const tx = new Transaction();
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_300_000 }));
+  for (const ix of ixs) tx.add(ix);
+
+  return rpcWithExtendedTimeout(connection, () =>
+    (program.provider as AnchorProvider).sendAndConfirm(tx, [], {
+      commitment: "confirmed",
+    })
   );
 }
 

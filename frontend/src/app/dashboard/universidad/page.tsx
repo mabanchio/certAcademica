@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
 import { api, type AuditEntry, type CertTokenAvailable, type Certification, type TokenRequest } from "@/lib/api";
-import { assignTokenTx, fetchTokenRequestDetailOnChain, mintTokenTx, requestTokensTx, sha256FromText } from "@/lib/solanaProgram";
+import { assignTokenTx, fetchTokenRequestDetailOnChain, mintTokensBatchTx, requestTokensTx, sha256FromText } from "@/lib/solanaProgram";
 
 // ── Tipos de solapas ───────────────────────────────────────────────────────
 type Tab = "certificaciones" | "solicitudes" | "acciones" | "actividad";
@@ -553,27 +553,35 @@ function TabAcciones({
       }
       
       let successCount = 0;
-      
-      for (let index = startIndex; index < endIndex; index++) {
+      const indexes = Array.from({ length: quantity }, (_, i) => startIndex + i);
+      const batches: number[][] = [];
+      for (let i = 0; i < indexes.length; i += 10) {
+        batches.push(indexes.slice(i, i + 10));
+      }
+
+      for (let batchIdx = 0; batchIdx < batches.length; batchIdx++) {
+        const batch = batches[batchIdx];
         try {
-          setProcessingMsg(`Acuñando token ${index - startIndex + 1}/${quantity} (índice ${index})...`);
-          
-          const sig = await mintTokenTx({
+          const from = batch[0];
+          const to = batch[batch.length - 1];
+          setProcessingMsg(`Acuñando lote ${batchIdx + 1}/${batches.length} (${batch.length} token/s: índices ${from}-${to})...`);
+
+          const sig = await mintTokensBatchTx({
             connection,
             wallet: anchorWallet,
             universidad: wallet,
             tokenRequest: new PublicKey(mintTarget),
-            index,
+            indexes: batch,
           });
-          
-          successCount++;
-          setMsg(`Token ${index} acuñado: ${sig}`);
-          
-          // Esperar 2 segundos entre transacciones
-          await new Promise((resolve) => setTimeout(resolve, 2000));
+
+          successCount += batch.length;
+          setMsg(`Lote ${batchIdx + 1} confirmado (${batch.length} token/s): ${sig}`);
+
+          // Pequeña pausa entre lotes para mejorar estabilidad del RPC local
+          await new Promise((resolve) => setTimeout(resolve, 700));
         } catch (e) {
           const err = e instanceof Error ? e.message : "Error desconocido";
-          setMsg(`Error en token ${index}: ${err}`);
+          setMsg(`Error en lote ${batchIdx + 1}: ${err}`);
           setProcessingMsg(null);
           break;
         }
