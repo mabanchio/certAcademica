@@ -31,14 +31,73 @@ function readU32(buffer: Buffer, offset: number): number {
 }
 
 function readString(buffer: Buffer, offset: number): [string, number] {
+  if (offset + 4 > buffer.length) {
+    throw new RangeError(`readString: offset ${offset} supera el buffer (${buffer.length})`);
+  }
   const len = readU32(buffer, offset);
   const start = offset + 4;
   const end = start + len;
+  if (end > buffer.length) {
+    throw new RangeError(`readString: longitud ${len} en offset ${offset} supera el buffer (${buffer.length})`);
+  }
   return [buffer.toString("utf8", start, end), end];
 }
 
 function readPubkey(buffer: Buffer, offset: number): [string, number] {
   return [bs58.encode(buffer.subarray(offset, offset + 32)), offset + 32];
+}
+
+function parseCertificationBuffer(data: Buffer, hasAnioEgreso: boolean): OnChainCertification {
+  let offset = 8;
+  let certToken: string;
+  let nombre: string;
+  let apellido: string;
+  let dni: string;
+  let carrera: string;
+  let universidad: string;
+
+  [certToken, offset] = readPubkey(data, offset);
+  [nombre, offset] = readString(data, offset);
+  [apellido, offset] = readString(data, offset);
+  [dni, offset] = readString(data, offset);
+  [carrera, offset] = readString(data, offset);
+
+  let anioEgreso = 0;
+  if (hasAnioEgreso) {
+    if (offset + 2 > data.length) throw new RangeError("anio_egreso out of range");
+    anioEgreso = data.readUInt16LE(offset);
+    offset += 2;
+  }
+
+  [universidad, offset] = readPubkey(data, offset);
+
+  if (offset >= data.length) throw new RangeError("estado out of range");
+  const estadoRaw = data.readUInt8(offset);
+  offset += 1;
+
+  if (offset + 32 > data.length) throw new RangeError("hash_datos out of range");
+  const hashDatos = data.subarray(offset, offset + 32).toString("hex");
+  offset += 32;
+
+  let motivoRevocacion: string;
+  [motivoRevocacion, offset] = readString(data, offset);
+
+  if (offset >= data.length) throw new RangeError("bump out of range");
+  const bump = data.readUInt8(offset);
+
+  return {
+    certToken,
+    nombre,
+    apellido,
+    dni,
+    carrera,
+    anioEgreso,
+    universidad,
+    estado: estadoRaw === 0 ? "Activa" : "Revocada",
+    hashDatos,
+    motivoRevocacion,
+    bump,
+  };
 }
 
 export async function fetchOnChainCertification(
@@ -82,45 +141,15 @@ export async function fetchOnChainCertification(
     return null;
   }
 
-  let offset = 8;
-  let certToken: string;
-  let nombre: string;
-  let apellido: string;
-  let dni: string;
-  let carrera: string;
-  let universidad: string;
-
-  [certToken, offset] = readPubkey(data, offset);
-  [nombre, offset] = readString(data, offset);
-  [apellido, offset] = readString(data, offset);
-  [dni, offset] = readString(data, offset);
-  [carrera, offset] = readString(data, offset);
-  const anioEgreso = data.readUInt16LE(offset);
-  offset += 2;
-  [universidad, offset] = readPubkey(data, offset);
-
-  const estadoRaw = data.readUInt8(offset);
-  offset += 1;
-
-  const hashDatos = data.subarray(offset, offset + 32).toString("hex");
-  offset += 32;
-
-  let motivoRevocacion: string;
-  [motivoRevocacion, offset] = readString(data, offset);
-
-  const bump = data.readUInt8(offset);
-
-  return {
-    certToken,
-    nombre,
-    apellido,
-    dni,
-    carrera,
-    anioEgreso,
-    universidad,
-    estado: estadoRaw === 0 ? "Activa" : "Revocada",
-    hashDatos,
-    motivoRevocacion,
-    bump,
-  };
+  // Intentar layout nuevo (con anio_egreso), luego layout viejo (sin anio_egreso).
+  // Las cuentas creadas antes del upgrade del contrato no tienen el campo anio_egreso.
+  try {
+    return parseCertificationBuffer(data, true);
+  } catch {
+    try {
+      return parseCertificationBuffer(data, false);
+    } catch {
+      return null;
+    }
+  }
 }
