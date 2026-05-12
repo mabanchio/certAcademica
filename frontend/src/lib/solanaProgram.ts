@@ -737,7 +737,9 @@ export async function fetchTokenRequestDetailOnChain(params: {
   const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
   const anioEgreso = view.getUint16(offsetAfterResolucion, true);
   const cantidad = view.getUint32(offsetAfterResolucion + 2, true);
-  const mintedCount = view.getUint32(offsetAfterResolucion + 6, true);
+  const estado = view.getUint8(offsetAfterResolucion + 6);
+  const [motivo_rechazo, offsetAfterMotivo] = readString(data, offsetAfterResolucion + 7);
+  const mintedCount = view.getUint32(offsetAfterMotivo, true);
 
   return {
     carrera: carrera || null,
