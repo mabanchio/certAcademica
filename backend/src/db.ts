@@ -181,11 +181,21 @@ export function getCertificationsByUniversidad(universidad: string, limit: numbe
 export function getCertificationsByEgresadoWallet(wallet: string, limit: number, offset: number): CertificationRow[] {
   const person = getPersonByWallet(wallet);
   const dni = (person?.dni ?? "").trim();
-  if (!dni) return [];
+  if (dni) {
+    return (getDb()
+      .prepare("SELECT * FROM certifications WHERE dni = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?")
+      .all(dni, limit, offset) as Record<string, unknown>[]).map((r) => sanitizeCertification(r, true));
+  }
+
+  const nombre = (person?.nombre ?? "").trim();
+  const apellido = (person?.apellido ?? "").trim();
+  if (!nombre || !apellido) return [];
 
   return (getDb()
-    .prepare("SELECT * FROM certifications WHERE dni = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?")
-    .all(dni, limit, offset) as Record<string, unknown>[]).map((r) => sanitizeCertification(r));
+    .prepare(
+      "SELECT * FROM certifications WHERE LOWER(COALESCE(nombre, '')) = LOWER(?) AND LOWER(COALESCE(apellido, '')) = LOWER(?) ORDER BY updated_at DESC LIMIT ? OFFSET ?"
+    )
+    .all(nombre, apellido, limit, offset) as Record<string, unknown>[]).map((r) => sanitizeCertification(r, true));
 }
 
 export function getActiveCertifications(limit: number, offset: number): CertificationRow[] {

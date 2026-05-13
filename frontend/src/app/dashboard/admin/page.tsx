@@ -78,6 +78,7 @@ export default function AdminDashboard() {
   const [selectedRequestLoading, setSelectedRequestLoading] = useState(false);
   const [selectedRequestError, setSelectedRequestError] = useState<string | null>(null);
   const [selectedRequestRoleData, setSelectedRequestRoleData] = useState<string | null>(null);
+  const [requestRoleDataMap, setRequestRoleDataMap] = useState<Record<string, string>>({});
   const [approving, setApproving] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
   const [rejectModalOpen, setRejectModalOpen] = useState(false);
@@ -155,9 +156,24 @@ export default function AdminDashboard() {
     setStats(s.data);
     setPersons(p.data);
     setCertifications(c.data);
-    setPendingRoleRequests(
-      buildPendingRoleRequests(requested.data, approved.data, rejected.data)
+    const pending = buildPendingRoleRequests(requested.data, approved.data, rejected.data);
+    setPendingRoleRequests(pending);
+
+    // Cargar role_data desde on-chain para cada solicitante pendiente
+    const uniqueRequesters = [...new Set(pending.map((r) => r.requester))];
+    const roleDataResults = await Promise.allSettled(
+      uniqueRequesters.map((wallet) =>
+        fetchPersonRoleDataOnChain({ connection, wallet: new PublicKey(wallet) })
+          .then((rd) => ({ wallet, roleData: rd ?? "" }))
+      )
     );
+    const rdMap: Record<string, string> = {};
+    for (const res of roleDataResults) {
+      if (res.status === "fulfilled" && res.value.roleData) {
+        rdMap[res.value.wallet] = res.value.roleData;
+      }
+    }
+    setRequestRoleDataMap(rdMap);
   };
 
   const onRevokeCertification = async (cert: Certification) => {
@@ -647,7 +663,7 @@ export default function AdminDashboard() {
                           <td className="px-4 py-3 text-gray-700">{requesterPerson?.nombre || "-"} {requesterPerson?.apellido || ""}</td>
                           <td className="px-4 py-3 text-gray-700">
                             <span className="text-xs text-gray-500">{roleContextLabel(r.role)}: </span>
-                            <span>{requesterPerson?.role_data || "Sin dato"}</span>
+                            <span>{requestRoleDataMap[r.requester] || requesterPerson?.role_data || "Sin dato"}</span>
                           </td>
                           <td className="px-4 py-3"><RoleBadge role={r.role} /></td>
                           <td className="px-4 py-3 text-gray-500">{r.slot}</td>

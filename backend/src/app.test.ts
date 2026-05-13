@@ -18,6 +18,7 @@ jest.mock("./db", () => ({
   getAllCertifications: jest.fn(() => []),
   getCertificationByPubkey: jest.fn(() => null),
   getCertificationsByUniversidad: jest.fn(() => []),
+  getCertificationsByEgresadoWallet: jest.fn(() => []),
   getActiveCertifications: jest.fn(() => []),
   getTokenRequestsByUniversidad: jest.fn(() => []),
   getTokenRequestsByStatus: jest.fn(() => []),
@@ -204,6 +205,36 @@ describe("GET /certifications", () => {
   test("filtra por estado=Activa", async () => {
     const res = await request(app).get("/certifications?estado=Activa");
     expect(res.status).toBe(200);
+  });
+});
+
+describe("GET /certifications/egresado/:wallet", () => {
+  test("devuelve las certificaciones privadas del egresado", async () => {
+    const db = require("./db");
+    db.getCertificationsByEgresadoWallet.mockReturnValueOnce([
+      {
+        pubkey: "cert-1",
+        cert_token: "token-1",
+        nombre: "Marcela",
+        apellido: "Aguirre",
+        dni: "38944529",
+        carrera: "Derecho",
+        anio_egreso: 2023,
+        universidad: "uni-1",
+        estado: "Activa",
+        hash_datos: "hash",
+        motivo_revocacion: null,
+        updated_at: 123,
+      },
+    ]);
+
+    const res = await request(app).get(
+      "/certifications/egresado/Fg6PaFpoGXkYsidMpWxTWqkZkqk7R8M4hFfYjE9C9m6N"
+    );
+
+    expect(res.status).toBe(200);
+    expect(res.body.data).toHaveLength(1);
+    expect(res.body.data[0].dni).toBe("38944529");
   });
 });
 

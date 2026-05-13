@@ -205,7 +205,7 @@ export default function EgresadoDashboard() {
           ) : (
             <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {certs.map((c) => (
-                <CertificationCard key={c.pubkey} cert={c} showQR />
+                <CertificationCard key={c.pubkey} cert={c} showQR showDni />
               ))}
             </div>
           )}

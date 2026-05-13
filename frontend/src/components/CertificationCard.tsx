@@ -5,9 +5,10 @@ import { QRCodeDisplay } from "./QRCode";
 interface Props {
   cert: Certification;
   showQR?: boolean;
+  showDni?: boolean;
 }
 
-export function CertificationCard({ cert, showQR = false }: Props) {
+export function CertificationCard({ cert, showQR = false, showDni = false }: Props) {
   const verifyUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/verify/${cert.pubkey}`;
 
   return (
@@ -23,6 +24,11 @@ export function CertificationCard({ cert, showQR = false }: Props) {
       </div>
 
       <div className="text-xs text-gray-500 space-y-1">
+        {showDni && cert.dni && (
+          <p>
+            <span className="font-medium text-gray-700">DNI:</span> {cert.dni}
+          </p>
+        )}
         <p>
           <span className="font-medium text-gray-700">Universidad:</span>{" "}
           {cert.universidad ? `${cert.universidad.slice(0, 8)}…` : "—"}
