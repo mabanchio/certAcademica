@@ -8,11 +8,14 @@ skip-lint = false
 [programs.localnet]
 academic_certification = "3A6PEQXB3UUrgNMEDnYYApx5B3jxwSfr7bTpjt5AEEpt"
 
+[programs.devnet]
+academic_certification = "3A6PEQXB3UUrgNMEDnYYApx5B3jxwSfr7bTpjt5AEEpt"
+
 [registry]
 url = "https://api.apr.dev"
 
 [provider]
-cluster = "Localnet"
+cluster = "Devnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]

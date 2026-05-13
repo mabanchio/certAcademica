@@ -65,10 +65,11 @@ cd indexer && npm run dev
 ```
 
 ## Programa Solana Desplegado
-- Red: Localnet / Devnet (segun configuracion)
-- Program ID (Anchor.toml localnet):
+- Red objetivo de entrega: Devnet
+- Program ID localnet/devnet (configurado):
   - `3A6PEQXB3UUrgNMEDnYYApx5B3jxwSfr7bTpjt5AEEpt`
-- Explorador: Solana Explorer / Solscan
+- Estado despliegue Devnet: en transición (pendiente confirmar transacción de deploy en explorer)
+- Explorador: Solana Explorer / Solscan (cluster devnet)
 
 ## Casos de Uso
 1. Solicitud de certificacion local o extranjera por Egresado.
