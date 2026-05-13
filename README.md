@@ -27,7 +27,7 @@ Ver diagrama y detalle tecnico en [docs/diagramas.md](docs/diagramas.md).
 - npm
 - Rust + Anchor CLI
 - Solana CLI
-- Wallet Solana (ej. Phantom)
+- Wallet Solana (ej. Phantom, Backpack)
 
 ### Instalacion de Dependencias
 ```bash
