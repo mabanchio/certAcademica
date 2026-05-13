@@ -2,6 +2,7 @@ import { getDb } from "./db";
 
 // Convierte un PublicKey de Anchor (que puede ser un objeto con toBase58) a string.
 function pk(value: unknown): string {
+  if (value === null || value === undefined) return "";
   if (typeof value === "string") return value;
   if (value && typeof (value as { toBase58?: () => string }).toBase58 === "function") {
     return (value as { toBase58: () => string }).toBase58();
@@ -176,21 +177,25 @@ export function handleEvent(name: string, data: any, signature: string): void {
     // ── Certificaciones ──────────────────────────────────────────────────
 
     case "TokenAssignedEvent":
+      {
+      const certToken = pk(data.certToken ?? data.cert_token);
+      if (!certToken) break;
       db.prepare(`
         INSERT OR REPLACE INTO certifications
           (pubkey, cert_token, universidad, carrera, nombre, apellido, dni, anio_egreso, estado, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'Activa', ?)
       `).run(
         pk(data.certification),
-        pk(data.certToken),
+        certToken,
         pk(data.universidad),
         data.carrera,
         data.nombre,
         data.apellido,
         data.dni,
-        data.anio_egreso,
+        data.anioEgreso ?? data.anio_egreso,
         ts(data.timestamp)
       );
+      }
       break;
 
     case "CertificationRevokedEvent":

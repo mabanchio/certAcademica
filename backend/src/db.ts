@@ -291,13 +291,29 @@ export function getGraduateRequestByPubkey(pubkey: string): GraduateRequestRow |
 
 export function getAvailableCertTokens(universidad: string): Array<{ cert_token_pubkey: string; timestamp: number }> {
   // cert_tokens acuñados por esta universidad que aún no están asignados (no aparecen en certifications)
-  // DISTINCT para evitar duplicados si hay múltiples audit entries para el mismo token
+  // También excluye tokens detectados por eventos TokenAssigned para cubrir
+  // registros históricos con cert_token mal indexado como "undefined".
+  // DISTINCT evita duplicados si hay múltiples audit entries para el mismo token.
   return getDb().prepare(`
     SELECT DISTINCT ae.entidad AS cert_token_pubkey, MAX(ae.timestamp) AS timestamp
     FROM audit_entries ae
     WHERE ae.actor = ? AND ae.accion = 'MintToken'
       AND ae.entidad NOT IN (
-        SELECT DISTINCT cert_token FROM certifications WHERE cert_token IS NOT NULL
+        SELECT DISTINCT cert_token
+        FROM certifications
+        WHERE cert_token IS NOT NULL
+          AND cert_token <> ''
+          AND cert_token <> 'undefined'
+        UNION
+        SELECT DISTINCT json_extract(e.data, '$.certToken')
+        FROM events e
+        WHERE e.event_type = 'TokenAssignedEvent'
+          AND json_extract(e.data, '$.certToken') IS NOT NULL
+        UNION
+        SELECT DISTINCT json_extract(e.data, '$.cert_token')
+        FROM events e
+        WHERE e.event_type = 'TokenAssignedEvent'
+          AND json_extract(e.data, '$.cert_token') IS NOT NULL
       )
     GROUP BY ae.entidad
     ORDER BY timestamp DESC

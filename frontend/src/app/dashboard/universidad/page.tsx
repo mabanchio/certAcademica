@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { api, type AuditEntry, type CertTokenAvailable, type Certification, type TokenRequest } from "@/lib/api";
+import { api, type AuditEntry, type CertTokenAvailable, type Certification, type EventRow, type TokenRequest } from "@/lib/api";
 import { assignTokenTx, fetchPersonRoleDataOnChain, fetchTokenRequestDetailOnChain, mintTokensBatchTx, requestTokensTx, sha256FromText } from "@/lib/solanaProgram";
 
 const PROGRAM_ID = new PublicKey(
@@ -59,13 +59,19 @@ function EstadoChip({ estado }: { estado: string | null }) {
 // ── Modal genérico ─────────────────────────────────────────────────────────
 function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4">
-      <div className="bg-white rounded-2xl shadow-xl w-full max-w-lg max-h-[90vh] overflow-y-auto">
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <div className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
           <h3 className="text-base font-semibold text-primary">{title}</h3>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl leading-none">&times;</button>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cerrar
+          </button>
         </div>
-        <div className="px-6 py-5 space-y-3">{children}</div>
+        <div className="max-h-[70vh] space-y-3 overflow-y-auto px-5 py-4">{children}</div>
       </div>
     </div>
   );
@@ -216,7 +222,7 @@ function TabCertificaciones({ certs }: { certs: Certification[] }) {
                   <td className="px-4 py-3">
                     <button
                       onClick={() => setSelected(c)}
-                      className="text-xs text-accent hover:underline font-medium"
+                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
                     >
                       Ver detalles
                     </button>
@@ -406,7 +412,7 @@ function TabSolicitudes({ requests, connection }: { requests: TokenRequest[]; co
                   <td className="px-4 py-3">
                     <button
                       onClick={() => setSelected(r)}
-                      className="text-xs text-accent hover:underline font-medium"
+                      className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
                     >
                       Ver detalles
                     </button>
@@ -422,31 +428,214 @@ function TabSolicitudes({ requests, connection }: { requests: TokenRequest[]; co
 }
 
 // ── Tab: Mi Actividad ─────────────────────────────────────────────────────
-function TabActividad({ audit }: { audit: AuditEntry[] }) {
+function TabActividad({ audit, tokenRequests, certs }: { audit: AuditEntry[]; tokenRequests: TokenRequest[]; certs: Certification[] }) {
+  const [actionFilter, setActionFilter] = useState<"all" | "RequestTokens" | "MintToken" | "AssignToken">("all");
+  const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<AuditEntry | null>(null);
+  const [txEvents, setTxEvents] = useState<EventRow[]>([]);
+  const [certDetail, setCertDetail] = useState<Certification | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+
+  const filtered = useMemo(() => {
+    const query = search.trim().toLowerCase();
+    return audit.filter((entry) => {
+      const matchAction = actionFilter === "all" || entry.accion === actionFilter;
+      if (!matchAction) return false;
+      if (!query) return true;
+      const label = (ACTION_LABEL[entry.accion] ?? entry.accion).toLowerCase();
+      return (
+        label.includes(query) ||
+        entry.entidad.toLowerCase().includes(query) ||
+        entry.signature.toLowerCase().includes(query) ||
+        (entry.motivo ?? "").toLowerCase().includes(query)
+      );
+    });
+  }, [audit, actionFilter, search]);
+
+  useEffect(() => {
+    if (!selected) {
+      setTxEvents([]);
+      setCertDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadDetail = async () => {
+      setLoadingDetail(true);
+      try {
+        const [eventsRes, certRes] = await Promise.all([
+          api.getTransactionBySignature(selected.signature).catch(() => ({ data: [] as EventRow[] })),
+          selected.accion === "AssignToken"
+            ? api.getCertification(selected.entidad).catch(() => ({ data: null as Certification | null }))
+            : Promise.resolve({ data: null as Certification | null }),
+        ]);
+        if (cancelled) return;
+        setTxEvents(eventsRes.data);
+        setCertDetail(certRes.data);
+      } finally {
+        if (!cancelled) setLoadingDetail(false);
+      }
+    };
+
+    loadDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected]);
+
+  const parseEventData = (row: EventRow): Record<string, unknown> => {
+    try {
+      return JSON.parse(row.data) as Record<string, unknown>;
+    } catch {
+      return {};
+    }
+  };
+
+  const findEvent = (eventType: string): Record<string, unknown> | null => {
+    const row = txEvents.find((e) => e.event_type === eventType);
+    return row ? parseEventData(row) : null;
+  };
+
+  const val = (obj: Record<string, unknown> | null, ...keys: string[]): string | null => {
+    if (!obj) return null;
+    for (const key of keys) {
+      const value = obj[key];
+      if (value !== undefined && value !== null && String(value).length > 0) return String(value);
+    }
+    return null;
+  };
+
+  const selectedRequest = selected?.accion === "RequestTokens"
+    ? tokenRequests.find((r) => r.pubkey === selected.entidad) ?? null
+    : null;
+  const selectedCert = selected?.accion === "AssignToken"
+    ? certs.find((c) => c.pubkey === selected.entidad) ?? certDetail
+    : null;
+
   if (audit.length === 0) {
     return <EmptyState message="No hay actividad registrada para este rol todavía." />;
   }
+
   return (
-    <div className="overflow-x-auto rounded-lg border border-gray-200">
-      <table className="min-w-full text-sm">
-        <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
-          <tr>
-            <th className="px-4 py-3 text-left">Acción</th>
-            <th className="px-4 py-3 text-left">Entidad</th>
-            <th className="px-4 py-3 text-left">Fecha</th>
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-gray-100">
-          {audit.map((e) => (
-            <tr key={e.id} className="hover:bg-gray-50">
-              <td className="px-4 py-3 font-medium">{ACTION_LABEL[e.accion] ?? e.accion}</td>
-              <td className="px-4 py-3 font-mono text-xs text-gray-500 truncate max-w-[160px]">{shortKey(e.entidad)}</td>
-              <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmt(e.timestamp)}</td>
+    <>
+      {selected && (
+        <Modal title="Detalle del movimiento" onClose={() => setSelected(null)}>
+          <DetailRow label="Acción" value={ACTION_LABEL[selected.accion] ?? selected.accion} />
+          <DetailRow label="Fecha" value={fmt(selected.timestamp)} />
+          <DetailRow label="Firma" value={<span className="font-mono text-xs break-all">{selected.signature}</span>} />
+          <DetailRow label="Entidad" value={<span className="font-mono text-xs break-all">{selected.entidad}</span>} />
+          <DetailRow label="Motivo" value={selected.motivo || "—"} />
+
+          {loadingDetail ? (
+            <p className="text-xs text-gray-500">Cargando detalle...</p>
+          ) : (
+            <>
+              {selected.accion === "RequestTokens" && (
+                <>
+                  <DetailRow label="Tipo" value="Solicitud de tokens" />
+                  <DetailRow label="Carrera" value={selectedRequest?.carrera ?? val(findEvent("TokenRequestedEvent"), "carrera")} />
+                  <DetailRow label="Plan" value={selectedRequest?.plan ?? "—"} />
+                  <DetailRow label="Resolución" value={selectedRequest?.resolucion ?? "—"} />
+                  <DetailRow label="Año egreso" value={selectedRequest?.anio_egreso ?? "—"} />
+                  <DetailRow label="Cantidad" value={selectedRequest?.cantidad ?? val(findEvent("TokenRequestedEvent"), "cantidad") ?? "—"} />
+                  <DetailRow label="Estado" value={selectedRequest?.estado ?? "—"} />
+                  <DetailRow label="Wallet solicitante" value={<span className="font-mono text-xs break-all">{selectedRequest?.solicitante ?? val(findEvent("TokenRequestedEvent"), "solicitante") ?? "—"}</span>} />
+                </>
+              )}
+
+              {selected.accion === "MintToken" && (
+                <>
+                  {(() => {
+                    const minted = findEvent("TokenMintedEvent");
+                    return (
+                      <>
+                        <DetailRow label="Tipo" value="Acuñación de token" />
+                        <DetailRow label="Cert token" value={<span className="font-mono text-xs break-all">{val(minted, "certToken", "cert_token") ?? selected.entidad}</span>} />
+                        <DetailRow label="Carrera" value={val(minted, "carrera") ?? "—"} />
+                        <DetailRow label="Índice" value={val(minted, "index") ?? "—"} />
+                        <DetailRow label="Universidad" value={<span className="font-mono text-xs break-all">{val(minted, "universidad") ?? "—"}</span>} />
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+
+              {selected.accion === "AssignToken" && (
+                <>
+                  {(() => {
+                    const assigned = findEvent("TokenAssignedEvent");
+                    return (
+                      <>
+                        <DetailRow label="Tipo" value="Asignación a egresado" />
+                        <DetailRow label="Certificación" value={<span className="font-mono text-xs break-all">{val(assigned, "certification") ?? selected.entidad}</span>} />
+                        <DetailRow label="Cert token" value={<span className="font-mono text-xs break-all">{selectedCert?.cert_token ?? val(assigned, "certToken", "cert_token") ?? "—"}</span>} />
+                        <DetailRow label="Titular" value={`${selectedCert?.nombre ?? val(assigned, "nombre") ?? ""} ${selectedCert?.apellido ?? val(assigned, "apellido") ?? ""}`.trim() || "—"} />
+                        <DetailRow label="Carrera" value={selectedCert?.carrera ?? val(assigned, "carrera") ?? "—"} />
+                        <DetailRow label="Año egreso" value={selectedCert?.anio_egreso ?? val(assigned, "anioEgreso", "anio_egreso") ?? "—"} />
+                        <DetailRow label="Estado certificación" value={selectedCert?.estado ?? "—"} />
+                        <DetailRow label="Hash datos" value={selectedCert?.hash_datos ? <span className="font-mono text-xs break-all">{selectedCert.hash_datos}</span> : "—"} />
+                      </>
+                    );
+                  })()}
+                </>
+              )}
+            </>
+          )}
+        </Modal>
+      )}
+
+      <div className="rounded-lg border border-gray-200 p-3 bg-white mb-3">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-2">
+          <select
+            value={actionFilter}
+            onChange={(e) => setActionFilter(e.target.value as "all" | "RequestTokens" | "MintToken" | "AssignToken")}
+            className="rounded-md border px-3 py-2 text-sm"
+          >
+            <option value="all">Todas las acciones</option>
+            <option value="RequestTokens">Solicitud de tokens</option>
+            <option value="MintToken">Acuñación de token</option>
+            <option value="AssignToken">Asignación / Certificación</option>
+          </select>
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por entidad, firma o motivo"
+            className="md:col-span-2 rounded-md border px-3 py-2 text-sm"
+          />
+        </div>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-gray-200">
+        <table className="min-w-full text-sm">
+          <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
+            <tr>
+              <th className="px-4 py-3 text-left">Acción</th>
+              <th className="px-4 py-3 text-left">Entidad</th>
+              <th className="px-4 py-3 text-left">Fecha</th>
+              <th className="px-4 py-3 text-left"></th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.map((e) => (
+              <tr key={e.id} className="hover:bg-gray-50">
+                <td className="px-4 py-3 font-medium">{ACTION_LABEL[e.accion] ?? e.accion}</td>
+                <td className="px-4 py-3 font-mono text-xs text-gray-500 truncate max-w-[160px]">{shortKey(e.entidad)}</td>
+                <td className="px-4 py-3 text-gray-500 whitespace-nowrap">{fmt(e.timestamp)}</td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => setSelected(e)}
+                    className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                  >
+                    Ver detalle
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {filtered.length === 0 && <EmptyState message="No hay movimientos que coincidan con los filtros." />}
+    </>
   );
 }
 
@@ -1072,7 +1261,7 @@ export default function UniversidadDashboard() {
               onAssignedLocal={handleAssignedLocal}
             />
           )}
-          {tab === "actividad" && <TabActividad audit={audit} />}
+          {tab === "actividad" && <TabActividad audit={audit} tokenRequests={tokenRequests} certs={certs} />}
         </div>
       )}
     </div>
