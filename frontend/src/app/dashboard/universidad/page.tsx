@@ -112,6 +112,7 @@ function TabCertificaciones({ certs }: { certs: Certification[] }) {
   const [search, setSearch] = useState("");
   const [year, setYear] = useState("");
   const [selected, setSelected] = useState<Certification | null>(null);
+  const [selectedDetail, setSelectedDetail] = useState<Certification | null>(null);
 
   const years = useMemo(
     () => [...new Set(certs.map((c) => c.anio_egreso).filter(Boolean) as number[])].sort((a, b) => b - a),
@@ -127,22 +128,57 @@ function TabCertificaciones({ certs }: { certs: Certification[] }) {
     });
   }, [certs, search, year]);
 
+  useEffect(() => {
+    if (!selected?.pubkey) {
+      setSelectedDetail(null);
+      return;
+    }
+
+    let cancelled = false;
+    const loadDetail = async () => {
+      try {
+        const res = await api.getCertification(selected.pubkey);
+        if (!cancelled) setSelectedDetail(res.data);
+      } catch {
+        if (!cancelled) setSelectedDetail(null);
+      }
+    };
+
+    loadDetail();
+    return () => {
+      cancelled = true;
+    };
+  }, [selected?.pubkey]);
+
+  const selectedMerged = selected
+    ? {
+        ...selected,
+        cert_token: selected.cert_token ?? selectedDetail?.cert_token ?? null,
+        carrera: selected.carrera ?? selectedDetail?.carrera ?? null,
+        anio_egreso: selected.anio_egreso ?? selectedDetail?.anio_egreso ?? null,
+        universidad: selected.universidad ?? selectedDetail?.universidad ?? null,
+        estado: selected.estado ?? selectedDetail?.estado ?? null,
+        hash_datos: selected.hash_datos ?? selectedDetail?.hash_datos ?? null,
+        motivo_revocacion: selected.motivo_revocacion ?? selectedDetail?.motivo_revocacion ?? null,
+      }
+    : null;
+
   return (
     <>
-      {selected && (
+      {selectedMerged && (
         <Modal title="Detalle de certificación" onClose={() => setSelected(null)}>
-          <DetailRow label="Titular" value={`${selected.nombre ?? ""} ${selected.apellido ?? ""}`} />
-          <DetailRow label="Carrera" value={selected.carrera} />
-          <DetailRow label="Año de egreso" value={selected.anio_egreso} />
-          <DetailRow label="Estado" value={<EstadoChip estado={selected.estado} />} />
-          <DetailRow label="Token cert." value={selected.cert_token ? shortKey(selected.cert_token) : null} />
-          <DetailRow label="Pubkey" value={<span className="font-mono text-xs">{selected.pubkey}</span>} />
-          {selected.motivo_revocacion && (
-            <DetailRow label="Motivo revocación" value={selected.motivo_revocacion} />
+          <DetailRow label="Titular" value={`${selectedMerged.nombre ?? ""} ${selectedMerged.apellido ?? ""}`} />
+          <DetailRow label="Carrera" value={selectedMerged.carrera} />
+          <DetailRow label="Año de egreso" value={selectedMerged.anio_egreso} />
+          <DetailRow label="Estado" value={<EstadoChip estado={selectedMerged.estado} />} />
+          <DetailRow label="Token cert." value={selectedMerged.cert_token ? shortKey(selectedMerged.cert_token) : null} />
+          <DetailRow label="Pubkey" value={<span className="font-mono text-xs">{selectedMerged.pubkey}</span>} />
+          {selectedMerged.motivo_revocacion && (
+            <DetailRow label="Motivo revocación" value={selectedMerged.motivo_revocacion} />
           )}
-          <DetailRow label="Actualizado" value={fmt(selected.updated_at)} />
+          <DetailRow label="Actualizado" value={fmt(selectedMerged.updated_at)} />
           <a
-            href={`/verify/${selected.pubkey}`}
+            href={`/verify/${selectedMerged.pubkey}`}
             target="_blank"
             rel="noreferrer"
             className="inline-block mt-2 text-xs text-accent hover:underline"
@@ -419,6 +455,12 @@ interface TokenRequestDetail {
   mintedCount: number;
 }
 
+interface AvailableCertToken extends CertTokenAvailable {
+  token_request: string | null;
+  carrera: string | null;
+  index: number | null;
+}
+
 function TabAcciones({
   wallet,
   anchorWallet,
@@ -426,13 +468,15 @@ function TabAcciones({
   tokenRequests,
   availableTokens,
   onDone,
+  onAssignedLocal,
 }: {
   wallet: PublicKey;
   anchorWallet: unknown;
   connection: unknown;
   tokenRequests: TokenRequest[];
-  availableTokens: CertTokenAvailable[];
+  availableTokens: AvailableCertToken[];
   onDone: () => Promise<void>;
+  onAssignedLocal: (certTokenPubkey: string) => void;
 }) {
   const [id, setId] = useState("");
   const [carrera, setCarrera] = useState("");
@@ -441,7 +485,7 @@ function TabAcciones({
   const [anio, setAnio] = useState("");
   const [cantidad, setCantidad] = useState("");
 
-  const [mintTarget, setMintTarget] = useState("");
+  const [selectedRequestPubkey, setSelectedRequestPubkey] = useState("");
   const [mintQuantity, setMintQuantity] = useState("1");
   const [mintDetail, setMintDetail] = useState<TokenRequestDetail | null>(null);
 
@@ -454,12 +498,38 @@ function TabAcciones({
   const [msg, setMsg] = useState<string | null>(null);
   const [reloadingTokens, setReloadingTokens] = useState(false);
   const [processingMsg, setProcessingMsg] = useState<string | null>(null);
+  const [selectedRequestDetail, setSelectedRequestDetail] = useState<TokenRequestOnChainDetail | null>(null);
 
   const approvedRequests = tokenRequests.filter((r) => r.estado === "Aprobada" && !!r.pubkey);
+  const selectedRequest = useMemo(() => {
+    const base = approvedRequests.find((r) => r.pubkey === selectedRequestPubkey) ?? null;
+    if (!base) return null;
+    // Enriquecer con datos on-chain si falta información
+    return {
+      ...base,
+      plan: base.plan ?? selectedRequestDetail?.plan ?? null,
+      anio_egreso: base.anio_egreso ?? selectedRequestDetail?.anioEgreso ?? null,
+      cantidad: base.cantidad ?? selectedRequestDetail?.cantidad ?? null,
+    };
+  }, [approvedRequests, selectedRequestPubkey, selectedRequestDetail]);
+
+  const selectedRequestAvailableTokens = useMemo(
+    () => (selectedRequestPubkey ? availableTokens.filter((token) => token.token_request === selectedRequestPubkey) : []),
+    [availableTokens, selectedRequestPubkey]
+  );
+
   const nextAssignableToken = useMemo(
-    // getAvailableCertTokens viene ordenado DESC por timestamp; para FIFO tomamos el más antiguo.
-    () => (availableTokens.length > 0 ? availableTokens[availableTokens.length - 1] : null),
-    [availableTokens]
+    () => {
+      if (selectedRequestAvailableTokens.length === 0) return null;
+      return selectedRequestAvailableTokens.reduce((best, current) => {
+        const bestIndex = best.index ?? Number.MAX_SAFE_INTEGER;
+        const currentIndex = current.index ?? Number.MAX_SAFE_INTEGER;
+        if (currentIndex < bestIndex) return current;
+        if (currentIndex > bestIndex) return best;
+        return current.timestamp < best.timestamp ? current : best;
+      });
+    },
+    [selectedRequestAvailableTokens]
   );
 
   useEffect(() => {
@@ -495,49 +565,79 @@ function TabAcciones({
     setReloadingTokens(true);
     try {
       await onDone();
+      if (selectedRequestPubkey) await reloadMintDetail();
     } finally {
       setReloadingTokens(false);
     }
   };
 
-  // Cargar detalle on-chain cuando se selecciona una solicitud para acuñar
-  useEffect(() => {
-    if (!mintTarget) {
+  // Función para recargar detalles de acuñación
+  const reloadMintDetail = async () => {
+    if (!selectedRequestPubkey) {
       setMintDetail(null);
       return;
     }
+    try {
+      const detail = await fetchTokenRequestDetailOnChain({
+        connection,
+        tokenRequest: new PublicKey(selectedRequestPubkey),
+      });
+      if (detail) {
+        setMintDetail({
+          cantidad: detail.cantidad ?? 0,
+          mintedCount: detail.mintedCount ?? 0,
+        });
+      } else {
+        setMintDetail(null);
+      }
+    } catch {
+      setMintDetail(null);
+    }
+  };
 
+  // Cargar detalle on-chain cuando se selecciona una solicitud
+  useEffect(() => {
+    if (!selectedRequestPubkey) {
+      setMintDetail(null);
+      return;
+    }
+    reloadMintDetail();
+  }, [selectedRequestPubkey, connection]);
+
+  // Cargar detalle on-chain para enriquecer datos de solicitud
+  useEffect(() => {
+    if (!selectedRequestPubkey) {
+      setSelectedRequestDetail(null);
+      return;
+    }
+    
     let cancelled = false;
-    const loadMintDetail = async () => {
+    const loadDetail = async () => {
       try {
         const detail = await fetchTokenRequestDetailOnChain({
           connection,
-          tokenRequest: new PublicKey(mintTarget),
+          tokenRequest: new PublicKey(selectedRequestPubkey),
         });
         if (!cancelled) {
-          if (detail) {
-            setMintDetail({
-              cantidad: detail.cantidad ?? 0,
-              mintedCount: detail.mintedCount ?? 0,
-            });
-          } else {
-            setMintDetail(null);
-          }
+          setSelectedRequestDetail(detail ?? null);
         }
       } catch {
         if (!cancelled) {
-          setMintDetail(null);
+          setSelectedRequestDetail(null);
         }
       }
     };
+    
+    loadDetail();
+    return () => { cancelled = true; };
+  }, [selectedRequestPubkey, connection]);
 
-    loadMintDetail();
-    return () => {
-      cancelled = true;
-    };
-  }, [mintTarget, connection]);
 
-  const run = async (action: () => Promise<string>) => {
+
+  const run = async (
+    action: () => Promise<string>,
+    options?: { waitUntilTokenRemoved?: string }
+  ) => {
     setBusy(true);
     setMsg(null);
     setProcessingMsg(null);
@@ -546,8 +646,7 @@ function TabAcciones({
       setMsg(`Transacción enviada: ${sig}`);
       setProcessingMsg("Esperando que el indexador procese el evento...");
       
-      // Reintentar cargar datos hasta que aparezca el nuevo token
-      // El indexador tarda en procesar, así que hacemos polling
+      // El indexador tarda en procesar, así que hacemos polling.
       let retries = 0;
       const maxRetries = 15;
       let tokenLoaded = false;
@@ -559,11 +658,20 @@ function TabAcciones({
         setProcessingMsg(`Buscando en indexador... (intento ${retries}/${maxRetries})`);
         
         try {
+          if (options?.waitUntilTokenRemoved) {
+            const availableRes = await api.getAvailableCertTokens(wallet.toBase58());
+            const stillAvailable = availableRes.data.some(
+              (t) => t.cert_token_pubkey === options.waitUntilTokenRemoved
+            );
+            if (stillAvailable) {
+              continue;
+            }
+          }
+
           await onDone();
-          // Si la recarga fue exitosa, asumimos que se cargó
+          if (selectedRequestPubkey) await reloadMintDetail();
           tokenLoaded = true;
           setProcessingMsg("✓ Datos cargados correctamente");
-          // Esperar un poco para que se vea el mensaje
           await new Promise((resolve) => setTimeout(resolve, 1000));
         } catch {
           // Si hay error en onDone, seguimos reintentando
@@ -592,7 +700,7 @@ function TabAcciones({
   };
 
   const runMultipleMints = async () => {
-    if (!mintTarget || !mintDetail) return;
+    if (!selectedRequestPubkey || !mintDetail) return;
     
     setBusy(true);
     setMsg(null);
@@ -628,7 +736,7 @@ function TabAcciones({
             connection,
             wallet: anchorWallet,
             universidad: wallet,
-            tokenRequest: new PublicKey(mintTarget),
+            tokenRequest: new PublicKey(selectedRequestPubkey),
             indexes: batch,
           });
 
@@ -660,6 +768,8 @@ function TabAcciones({
           
           try {
             await onDone();
+            // Recargamos el contador de acuñación para que esté sincronizado
+            if (selectedRequestPubkey) await reloadMintDetail();
             setProcessingMsg("✓ Sincronización completada");
             await new Promise((resolve) => setTimeout(resolve, 1000));
             break;
@@ -725,7 +835,7 @@ function TabAcciones({
       <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
         <h3 className="font-semibold text-primary">2) Acuñar tokens de certificación</h3>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <select value={mintTarget} onChange={(e) => setMintTarget(e.target.value)} className="rounded-md border px-3 py-2 text-sm">
+          <select value={selectedRequestPubkey} onChange={(e) => setSelectedRequestPubkey(e.target.value)} className="rounded-md border px-3 py-2 text-sm">
             <option value="">Selecciona solicitud aprobada</option>
             {approvedRequests.map((r) => (
               <option key={r.pubkey} value={r.pubkey}>{r.carrera ?? "Carrera"} · {shortKey(r.pubkey)}</option>
@@ -764,7 +874,7 @@ function TabAcciones({
         
         <button
           type="button"
-          disabled={busy || !mintTarget || !mintDetail}
+          disabled={busy || !selectedRequestPubkey || !mintDetail}
           onClick={runMultipleMints}
           className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
         >
@@ -785,18 +895,31 @@ function TabAcciones({
           </button>
         </div>
         
-        <div className="rounded-md bg-gray-50 p-3 border border-gray-200">
-          <div className="text-xs font-medium text-gray-600 mb-2">
-            Tokens acuñados disponibles: <span className="text-base font-bold text-primary">{availableTokens.length}</span>
+        <div className="rounded-md bg-gray-50 p-3 border border-gray-200 space-y-3">
+          <div className="text-xs font-medium text-gray-600">
+            Tokens acuñados disponibles: <span className="text-base font-bold text-primary">{selectedRequestAvailableTokens.length}</span>
           </div>
-          <div className="text-xs text-gray-600 mb-2">
+          <div className="text-xs text-gray-600">
             Institución: <span className="font-semibold text-primary">{institucionAsignadora}</span>
           </div>
-          {availableTokens.length === 0 ? (
-            <div className="text-xs text-gray-500 italic">No hay tokens disponibles. Acuña uno primero en la sección anterior.</div>
+
+          {selectedRequest ? (
+            <div className="space-y-1 text-xs text-gray-700">
+              <div><span className="font-medium text-gray-600">Solicitud seleccionada:</span> {selectedRequest.carrera ?? "—"}</div>
+              <div><span className="font-medium text-gray-600">Plan:</span> {selectedRequest.plan ?? "—"}</div>
+              <div><span className="font-medium text-gray-600">Año de egreso:</span> {selectedRequest.anio_egreso ?? "—"}</div>
+              <div><span className="font-medium text-gray-600">Cantidad solicitada:</span> {selectedRequest.cantidad ?? "—"}</div>
+              <div><span className="font-medium text-gray-600">Tokens disponibles de esta solicitud:</span> {selectedRequestAvailableTokens.length}</div>
+              <div><span className="font-medium text-gray-600">Token elegido para asignar:</span> {nextAssignableToken ? `${nextAssignableToken.index ?? "?"} · ${shortKey(nextAssignableToken.cert_token_pubkey)}` : "—"}</div>
+            </div>
+          ) : null}
+          {!selectedRequestPubkey ? (
+            <div className="text-xs text-gray-500 italic">Selecciona una solicitud aprobada en la sección anterior para asignar tokens.</div>
+          ) : selectedRequestAvailableTokens.length === 0 ? (
+            <div className="text-xs text-gray-500 italic">No hay tokens disponibles para esta solicitud. Acuña más tokens si hay cupo.</div>
           ) : (
             <div className="text-xs text-gray-700">
-              Asignación automática: se utilizará el próximo token disponible (FIFO), sin selección manual.
+              Asignación automática: se utilizará el próximo token disponible de esta solicitud (FIFO), sin selección manual.
             </div>
           )}
         </div>
@@ -808,20 +931,25 @@ function TabAcciones({
         </div>
         <button
           type="button"
-          disabled={busy || !nextAssignableToken}
+          disabled={busy || !selectedRequestPubkey || !nextAssignableToken}
           onClick={() => run(async () => {
+            const assignedCertToken = nextAssignableToken!.cert_token_pubkey;
             const hashDatos = await sha256FromText(JSON.stringify({ nombre, apellido, dni }));
-            return assignTokenTx({
+            const sig = await assignTokenTx({
               connection,
               wallet: anchorWallet,
               universidad: wallet,
-              certToken: new PublicKey(nextAssignableToken!.cert_token_pubkey),
+              tokenRequest: new PublicKey(selectedRequestPubkey!),
+              certToken: new PublicKey(assignedCertToken),
               nombre,
               apellido,
               dni,
               hashDatos,
             });
-          })}
+            // Reflejar en UI inmediatamente para evitar desfase con el indexador.
+            onAssignedLocal(assignedCertToken);
+            return sig;
+          }, { waitUntilTokenRemoved: nextAssignableToken!.cert_token_pubkey })}
           className="rounded-md bg-primary px-3 py-2 text-sm font-medium text-white disabled:opacity-60"
         >
           Asignar token
@@ -846,18 +974,31 @@ export default function UniversidadDashboard() {
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
+  const handleAssignedLocal = (certTokenPubkey: string) => {
+    setAvailableTokens((prev) => prev.filter((t) => t.cert_token_pubkey !== certTokenPubkey));
+  };
+
   const loadData = async (wallet: string) => {
-    const [certRes, trRes, auditRes, availableRes] = await Promise.all([
-      api.getCertificationsByUniversidad(wallet),
-      api.getTokenRequestsByUniversidad(wallet),
-      api.getAuditByActor(wallet, 100),
-      api.getAvailableCertTokens(wallet),
-    ]);
-    const universityActions = new Set(["RequestTokens", "MintToken", "AssignToken"]);
-    setCerts(certRes.data);
-    setTokenRequests(trRes.data);
-    setAvailableTokens(availableRes.data);
-    setAudit(auditRes.data.filter((e) => universityActions.has(e.accion)));
+    try {
+      const [certRes, trRes, auditRes, availableRes] = await Promise.all([
+        api.getCertificationsByUniversidad(wallet),
+        api.getTokenRequestsByUniversidad(wallet),
+        api.getAuditByActor(wallet, 100),
+        api.getAvailableCertTokens(wallet),
+      ]);
+      const universityActions = new Set(["RequestTokens", "MintToken", "AssignToken"]);
+      setCerts(certRes.data);
+      setTokenRequests(trRes.data);
+      setAvailableTokens(availableRes.data);
+      setAudit(auditRes.data.filter((e) => universityActions.has(e.accion)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "No se pudieron cargar los datos";
+      if (message.includes("Demasiadas solicitudes")) {
+        console.warn("Carga pospuesta por rate limit del backend");
+        return;
+      }
+      console.error("loadData falló", error);
+    }
   };
 
   useEffect(() => {
@@ -876,10 +1017,10 @@ export default function UniversidadDashboard() {
   }, [publicKey]);
 
   const TABS: { key: Tab; label: string; count?: number }[] = [
-    { key: "certificaciones", label: "Certificaciones emitidas", count: certs.length },
+    { key: "certificaciones", label: "Certificaciones emitidas" },
     { key: "solicitudes", label: "Solicitudes de tokens", count: tokenRequests.length },
     { key: "acciones", label: "Acciones" },
-    { key: "actividad", label: "Mi actividad", count: audit.length },
+    { key: "actividad", label: "Mi actividad" },
   ];
 
   return (
@@ -928,6 +1069,7 @@ export default function UniversidadDashboard() {
               tokenRequests={tokenRequests}
               availableTokens={availableTokens}
               onDone={() => loadData(publicKey.toBase58())}
+              onAssignedLocal={handleAssignedLocal}
             />
           )}
           {tab === "actividad" && <TabActividad audit={audit} />}

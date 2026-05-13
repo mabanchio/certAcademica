@@ -133,4 +133,116 @@ function migrate(db: Database.Database): void {
   // Migraciones incrementales (columnas añadidas después del schema inicial)
   const addColIfMissing = (sql: string) => { try { db.exec(sql); } catch { /* ya existe */ } };
   addColIfMissing("ALTER TABLE certifications ADD COLUMN anio_egreso INTEGER");
+
+  // Repara solicitudes de graduación históricas cuando el parser tomó campos
+  // snake_case/camelCase de forma inconsistente (ej: pubkey/estado = 'undefined').
+  const normalizeEnum = (value: unknown): string => {
+    if (typeof value === "string") {
+      const v = value.trim();
+      if (!v) return v;
+      if (v.includes("_")) {
+        return v
+          .split("_")
+          .filter(Boolean)
+          .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
+          .join("");
+      }
+      return v.charAt(0).toUpperCase() + v.slice(1);
+    }
+    if (value && typeof value === "object") {
+      const keys = Object.keys(value as object);
+      if (keys.length > 0) return normalizeEnum(keys[0]);
+    }
+    return String(value ?? "");
+  };
+
+  const toTs = (value: unknown, fallback: number): number => {
+    if (typeof value === "bigint") return Number(value);
+    if (typeof value === "number" && Number.isFinite(value)) return value;
+    if (typeof value === "string") {
+      const s = value.trim();
+      if (/^\d+$/.test(s)) return Number(s);
+      if (/^[0-9a-fA-F]+$/.test(s)) {
+        const n = Number.parseInt(s, 16);
+        if (Number.isFinite(n)) return n;
+      }
+    }
+    return fallback;
+  };
+
+  try {
+    const eventRows = db
+      .prepare(
+        `SELECT event_type, data, slot, processed_at
+         FROM events
+         WHERE event_type IN ('CertificationRequestedEvent', 'GraduateRequestResolvedEvent')
+         ORDER BY id ASC`
+      )
+      .all() as Array<{ event_type: string; data: string; slot: number; processed_at: number }>;
+
+    const upsertRequested = db.prepare(`
+      INSERT OR REPLACE INTO graduate_requests
+        (pubkey, wallet, tipo, estado, updated_at)
+      VALUES (?, ?, ?, 'Pendiente', ?)
+    `);
+
+    const updateResolved = db.prepare(`
+      UPDATE graduate_requests
+      SET estado = ?, motivo = ?, updated_at = ?
+      WHERE pubkey = ?
+    `);
+
+    for (const row of eventRows) {
+      let parsed: Record<string, unknown>;
+      try {
+        parsed = JSON.parse(row.data) as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+
+      const ts = toTs(parsed.timestamp, row.processed_at || row.slot || 0);
+
+      if (row.event_type === "CertificationRequestedEvent") {
+        const pubkey = String(parsed.graduate_request ?? parsed.graduateRequest ?? "").trim();
+        const wallet = String(parsed.wallet ?? "").trim();
+        if (!pubkey || !wallet) continue;
+        upsertRequested.run(pubkey, wallet, normalizeEnum(parsed.tipo), ts);
+      }
+
+      if (row.event_type === "GraduateRequestResolvedEvent") {
+        const pubkey = String(parsed.graduate_request ?? parsed.graduateRequest ?? "").trim();
+        if (!pubkey) continue;
+        updateResolved.run(
+          normalizeEnum(parsed.nuevo_estado ?? parsed.nuevoEstado),
+          String(parsed.motivo ?? ""),
+          ts,
+          pubkey
+        );
+      }
+    }
+
+    db.exec("DELETE FROM graduate_requests WHERE pubkey = 'undefined' OR wallet = 'undefined'");
+  } catch {
+    // Si algo falla en la reparación, no interrumpir el arranque del indexer.
+  }
+
+  // Dedupe histórico de auditoría: conserva un único registro por evento lógico.
+  db.exec(`
+    DELETE FROM audit_entries
+    WHERE id NOT IN (
+      SELECT MIN(id)
+      FROM audit_entries
+      GROUP BY signature, actor, accion, entidad, COALESCE(motivo, ''), timestamp
+    )
+  `);
+
+  // Evita duplicados futuros (ej. carreras entre WS y polling fallback).
+  try {
+    db.exec(`
+      CREATE UNIQUE INDEX IF NOT EXISTS ux_audit_unique_event
+      ON audit_entries(signature, actor, accion, entidad, COALESCE(motivo, ''), timestamp)
+    `);
+  } catch {
+    // Si por cualquier motivo no se puede crear, el indexador sigue funcionando.
+  }
 }

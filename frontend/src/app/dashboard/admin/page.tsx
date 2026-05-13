@@ -50,6 +50,10 @@ export default function AdminDashboard() {
   const [certifications, setCertifications] = useState<Certification[]>([]);
   const [persons, setPersons] = useState<Person[]>([]);
   const [pendingRoleRequests, setPendingRoleRequests] = useState<PendingRoleRequest[]>([]);
+  const [selectedCertification, setSelectedCertification] = useState<Certification | null>(null);
+  const [selectedCertificationDetail, setSelectedCertificationDetail] = useState<Certification | null>(null);
+  const [selectedCertificationLoading, setSelectedCertificationLoading] = useState(false);
+  const [selectedCertificationError, setSelectedCertificationError] = useState<string | null>(null);
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [selectedPersonLoading, setSelectedPersonLoading] = useState(false);
   const [selectedPersonError, setSelectedPersonError] = useState<string | null>(null);
@@ -85,7 +89,49 @@ export default function AdminDashboard() {
   const [revoking, setRevoking] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
+  // ── Tabs ──
+  type AdminTab = "solicitudes" | "personas" | "certificaciones";
+  const [activeTab, setActiveTab] = useState<AdminTab>("solicitudes");
+
+  // ── Filtros por tab ──
+  const [filterSol, setFilterSol] = useState({ wallet: "", nombre: "", rol: "" });
+  const [filterPer, setFilterPer] = useState({ nombre: "", apellido: "", wallet: "", rol: "", estado: "" });
+  const [filterCert, setFilterCert] = useState({ nombre: "", apellido: "", carrera: "", estado: "", anio: "" });
+
   const personByWallet = useMemo(() => new Map(persons.map((p) => [p.wallet, p])), [persons]);
+
+  const filteredSolicitudes = useMemo(() => {
+    return pendingRoleRequests.filter((r) => {
+      const p = personByWallet.get(r.requester);
+      const nombre = `${p?.nombre ?? ""} ${p?.apellido ?? ""}`.toLowerCase();
+      if (filterSol.wallet && !r.requester.toLowerCase().includes(filterSol.wallet.toLowerCase())) return false;
+      if (filterSol.nombre && !nombre.includes(filterSol.nombre.toLowerCase())) return false;
+      if (filterSol.rol && r.role.toLowerCase() !== filterSol.rol.toLowerCase()) return false;
+      return true;
+    });
+  }, [pendingRoleRequests, personByWallet, filterSol]);
+
+  const filteredPersons = useMemo(() => {
+    return persons.filter((p) => {
+      if (filterPer.nombre && !(p.nombre ?? "").toLowerCase().includes(filterPer.nombre.toLowerCase())) return false;
+      if (filterPer.apellido && !(p.apellido ?? "").toLowerCase().includes(filterPer.apellido.toLowerCase())) return false;
+      if (filterPer.wallet && !p.wallet.toLowerCase().includes(filterPer.wallet.toLowerCase())) return false;
+      if (filterPer.rol && !p.roles.some((r) => r.toLowerCase() === filterPer.rol.toLowerCase())) return false;
+      if (filterPer.estado && !(p.status ?? "").toLowerCase().includes(filterPer.estado.toLowerCase())) return false;
+      return true;
+    });
+  }, [persons, filterPer]);
+
+  const filteredCertifications = useMemo(() => {
+    return certifications.filter((c) => {
+      if (filterCert.nombre && !(c.nombre ?? "").toLowerCase().includes(filterCert.nombre.toLowerCase())) return false;
+      if (filterCert.apellido && !(c.apellido ?? "").toLowerCase().includes(filterCert.apellido.toLowerCase())) return false;
+      if (filterCert.carrera && !(c.carrera ?? "").toLowerCase().includes(filterCert.carrera.toLowerCase())) return false;
+      if (filterCert.estado && !(c.estado ?? "").toLowerCase().includes(filterCert.estado.toLowerCase())) return false;
+      if (filterCert.anio && !(c.anio_egreso ?? "").toString().includes(filterCert.anio)) return false;
+      return true;
+    });
+  }, [certifications, filterCert]);
 
   const loadSystemStatus = async () => {
     try {
@@ -139,6 +185,23 @@ export default function AdminDashboard() {
       setStatusMsg(msg);
     } finally {
       setRevoking(null);
+    }
+  };
+
+  const onOpenCertificationDetail = async (cert: Certification) => {
+    setSelectedCertification(cert);
+    setSelectedCertificationDetail(null);
+    setSelectedCertificationError(null);
+    setSelectedCertificationLoading(true);
+
+    try {
+      const res = await api.getCertification(cert.pubkey);
+      setSelectedCertificationDetail(res.data);
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "No se pudo cargar el detalle de la certificación";
+      setSelectedCertificationError(msg);
+    } finally {
+      setSelectedCertificationLoading(false);
     }
   };
 
@@ -487,127 +550,406 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      <section>
-        <h2 className="text-lg font-semibold text-primary mb-3">Certificaciones emitidas</h2>
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
-              <tr>
-                <th className="px-4 py-3 text-left">Pubkey</th>
-                <th className="px-4 py-3 text-left">Titular</th>
-                <th className="px-4 py-3 text-left">Estado</th>
-                <th className="px-4 py-3 text-left">Acción</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {certifications.map((c) => (
-                <tr key={c.pubkey} className="hover:bg-gray-50">
-                  <td className="px-4 py-3 font-mono text-xs" title={c.pubkey}>{shortAddress(c.pubkey)}</td>
-                  <td className="px-4 py-3">{c.nombre ?? ""} {c.apellido ?? ""}</td>
-                  <td className="px-4 py-3"><StatusChip status={c.estado ?? ""} /></td>
-                  <td className="px-4 py-3">
-                    {c.estado === "Revocada" ? (
-                      <span className="text-xs text-gray-500">Ya revocada</span>
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => onRevokeCertification(c)}
-                        disabled={revoking === c.pubkey}
-                        className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-60"
-                      >
-                        {revoking === c.pubkey ? "Revocando..." : "Revocar"}
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* ── Tabs ── */}
+      <div>
+        {/* Tab headers */}
+        <div className="flex border-b border-gray-200 mb-0">
+          {(
+            [
+              { key: "solicitudes", label: "Solicitudes de rol pendientes", count: pendingRoleRequests.length },
+              { key: "personas", label: "Personas registradas" },
+              { key: "certificaciones", label: "Certificaciones emitidas" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.key}
+              type="button"
+              onClick={() => setActiveTab(t.key)}
+              className={`px-5 py-3 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === t.key
+                  ? "border-primary text-primary"
+                  : "border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300"
+              }`}
+            >
+              {t.label}
+              {"count" in t && typeof t.count === "number" && t.count > 0 && (
+                <span className={`ml-2 rounded-full px-2 py-0.5 text-xs font-semibold ${activeTab === t.key ? "bg-primary/10 text-primary" : "bg-gray-100 text-gray-500"}`}>
+                  {t.count}
+                </span>
+              )}
+            </button>
+          ))}
         </div>
-      </section>
 
-      {/* Listado de personas */}
-      <section>
-        <h2 className="text-lg font-semibold text-primary mb-3">Personas registradas</h2>
-        <div className="overflow-x-auto rounded-lg border border-gray-200">
-          <table className="min-w-full text-sm">
-            <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
-              <tr>
-                <th className="px-4 py-3 text-left">Wallet</th>
-                <th className="px-4 py-3 text-left">Nombre</th>
-                <th className="px-4 py-3 text-left">Estado</th>
-                <th className="px-4 py-3 text-left">Roles</th>
-                <th className="px-4 py-3 text-left">Acción</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {persons.map((p) => {
-                const isAdmin = p.roles.some((r) => r.toLowerCase() === "admin");
-                const isSelf = publicKey?.toBase58() === p.wallet;
-                const isActive = (p.status ?? "").toLowerCase() === "activo";
-                const isToggling = togglingStatus === p.wallet;
-                return (
-                  <tr key={p.wallet} className="hover:bg-gray-50">
-                    <td className="px-4 py-3 font-mono text-xs text-gray-500 truncate max-w-[160px]">
-                      <span title={p.wallet}>{shortAddress(p.wallet)}</span>
-                    </td>
-                    <td className="px-4 py-3">
-                      {p.nombre} {p.apellido}
-                    </td>
-                    <td className="px-4 py-3">
-                      <StatusChip status={p.status ?? ""} />
-                    </td>
-                    <td className="px-4 py-3 flex flex-wrap gap-1">
-                      {p.roles.map((r) => <RoleBadge key={r} role={r} />)}
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => onOpenPersonDetail(p.wallet)}
-                          className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                        >
-                          Ver detalle
-                        </button>
-                        {!isAdmin && !isSelf ? (
-                          <button
-                            type="button"
-                            onClick={() => onOpenEditPerson(p.wallet)}
-                            className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
-                          >
-                            Editar
-                          </button>
-                        ) : null}
-                        {!isAdmin && !isSelf ? (
-                          <button
-                            type="button"
-                            onClick={() => onToggleStatus(p)}
-                            disabled={isToggling}
-                            className={`rounded-md px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60 ${
-                              isActive
-                                ? "bg-red-500 hover:bg-red-600"
-                                : "bg-green-600 hover:bg-green-700"
-                            }`}
-                          >
-                            {isToggling
-                              ? "Procesando..."
-                              : isActive
-                              ? "Deshabilitar"
-                              : "Habilitar"}
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
-        {statusMsg && (
-          <p className="mt-3 break-all text-xs text-gray-700">{statusMsg}</p>
+        {/* ── Tab: Solicitudes de rol pendientes ── */}
+        {activeTab === "solicitudes" && (
+          <section className="pt-4 space-y-4">
+            {/* Filtros */}
+            <div className="flex flex-wrap gap-3">
+              <input
+                type="text"
+                placeholder="Filtrar por wallet..."
+                value={filterSol.wallet}
+                onChange={(e) => setFilterSol((f) => ({ ...f, wallet: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-52"
+              />
+              <input
+                type="text"
+                placeholder="Filtrar por nombre..."
+                value={filterSol.nombre}
+                onChange={(e) => setFilterSol((f) => ({ ...f, nombre: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-44"
+              />
+              <select
+                value={filterSol.rol}
+                onChange={(e) => setFilterSol((f) => ({ ...f, rol: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary"
+              >
+                <option value="">Todos los roles</option>
+                <option value="Universidad">Universidad</option>
+                <option value="Ministerio">Ministerio</option>
+                <option value="Cancilleria">Cancillería</option>
+                <option value="Egresado">Egresado</option>
+              </select>
+              {(filterSol.wallet || filterSol.nombre || filterSol.rol) && (
+                <button
+                  type="button"
+                  onClick={() => setFilterSol({ wallet: "", nombre: "", rol: "" })}
+                  className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+
+            {filteredSolicitudes.length === 0 ? (
+              <p className="text-sm text-gray-500">No hay solicitudes pendientes{filterSol.wallet || filterSol.nombre || filterSol.rol ? " con esos filtros" : ""}.</p>
+            ) : (
+              <div className="overflow-x-auto rounded-lg border border-gray-200">
+                <table className="min-w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
+                    <tr>
+                      <th className="px-4 py-3 text-left">Solicitante</th>
+                      <th className="px-4 py-3 text-left">Nombre</th>
+                      <th className="px-4 py-3 text-left">Referencia</th>
+                      <th className="px-4 py-3 text-left">Rol</th>
+                      <th className="px-4 py-3 text-left">Slot</th>
+                      <th className="px-4 py-3 text-left">Acción</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredSolicitudes.map((r) => {
+                      const key = `${r.requester}:${r.role}`;
+                      const requesterPerson = personByWallet.get(r.requester);
+                      return (
+                        <tr key={key} className="hover:bg-gray-50">
+                          <td className="px-4 py-3 font-mono text-xs text-gray-600" title={r.requester}>{shortAddress(r.requester)}</td>
+                          <td className="px-4 py-3 text-gray-700">{requesterPerson?.nombre || "-"} {requesterPerson?.apellido || ""}</td>
+                          <td className="px-4 py-3 text-gray-700">
+                            <span className="text-xs text-gray-500">{roleContextLabel(r.role)}: </span>
+                            <span>{requesterPerson?.role_data || "Sin dato"}</span>
+                          </td>
+                          <td className="px-4 py-3"><RoleBadge role={r.role} /></td>
+                          <td className="px-4 py-3 text-gray-500">{r.slot}</td>
+                          <td className="px-4 py-3">
+                            <div className="flex items-center gap-2">
+                              <button
+                                type="button"
+                                onClick={() => onOpenRequestDetail(r)}
+                                className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                              >
+                                Ver detalle
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onApprove(r)}
+                                disabled={approving === key}
+                                className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
+                              >
+                                {approving === key ? "Aprobando..." : "Aprobar"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => onOpenRejectModal(r)}
+                                disabled={rejecting === key}
+                                className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-60"
+                              >
+                                {rejecting === key ? "Rechazando..." : "Rechazar"}
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+            {approvalMsg && (
+              <p className="mt-3 break-all text-xs text-gray-700">{approvalMsg}</p>
+            )}
+          </section>
         )}
-      </section>
+
+        {/* ── Tab: Personas registradas ── */}
+        {activeTab === "personas" && (
+          <section className="pt-4 space-y-4">
+            {/* Filtros */}
+            <div className="flex flex-wrap gap-3">
+              <input
+                type="text"
+                placeholder="Filtrar por nombre..."
+                value={filterPer.nombre}
+                onChange={(e) => setFilterPer((f) => ({ ...f, nombre: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-40"
+              />
+              <input
+                type="text"
+                placeholder="Filtrar por apellido..."
+                value={filterPer.apellido}
+                onChange={(e) => setFilterPer((f) => ({ ...f, apellido: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-40"
+              />
+              <input
+                type="text"
+                placeholder="Filtrar por wallet..."
+                value={filterPer.wallet}
+                onChange={(e) => setFilterPer((f) => ({ ...f, wallet: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-52"
+              />
+              <select
+                value={filterPer.rol}
+                onChange={(e) => setFilterPer((f) => ({ ...f, rol: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary"
+              >
+                <option value="">Todos los roles</option>
+                <option value="Admin">Admin</option>
+                <option value="Universidad">Universidad</option>
+                <option value="Ministerio">Ministerio</option>
+                <option value="Cancilleria">Cancillería</option>
+                <option value="Egresado">Egresado</option>
+              </select>
+              <select
+                value={filterPer.estado}
+                onChange={(e) => setFilterPer((f) => ({ ...f, estado: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary"
+              >
+                <option value="">Todos los estados</option>
+                <option value="activo">Activo</option>
+                <option value="inactivo">Inactivo</option>
+              </select>
+              {(filterPer.nombre || filterPer.apellido || filterPer.wallet || filterPer.rol || filterPer.estado) && (
+                <button
+                  type="button"
+                  onClick={() => setFilterPer({ nombre: "", apellido: "", wallet: "", rol: "", estado: "" })}
+                  className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Wallet</th>
+                    <th className="px-4 py-3 text-left">Nombre</th>
+                    <th className="px-4 py-3 text-left">Estado</th>
+                    <th className="px-4 py-3 text-left">Roles</th>
+                    <th className="px-4 py-3 text-left">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredPersons.map((p) => {
+                    const isAdmin = p.roles.some((r) => r.toLowerCase() === "admin");
+                    const isSelf = publicKey?.toBase58() === p.wallet;
+                    const isActive = (p.status ?? "").toLowerCase() === "activo";
+                    const isToggling = togglingStatus === p.wallet;
+                    return (
+                      <tr key={p.wallet} className="hover:bg-gray-50">
+                        <td className="px-4 py-3 font-mono text-xs text-gray-500 truncate max-w-[160px]">
+                          <span title={p.wallet}>{shortAddress(p.wallet)}</span>
+                        </td>
+                        <td className="px-4 py-3">
+                          {p.nombre} {p.apellido}
+                        </td>
+                        <td className="px-4 py-3">
+                          <StatusChip status={p.status ?? ""} />
+                        </td>
+                        <td className="px-4 py-3 flex flex-wrap gap-1">
+                          {p.roles.map((r) => <RoleBadge key={r} role={r} />)}
+                        </td>
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              onClick={() => onOpenPersonDetail(p.wallet)}
+                              className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                            >
+                              Ver detalle
+                            </button>
+                            {!isAdmin && !isSelf ? (
+                              <button
+                                type="button"
+                                onClick={() => onOpenEditPerson(p.wallet)}
+                                className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1.5 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                              >
+                                Editar
+                              </button>
+                            ) : null}
+                            {!isAdmin && !isSelf ? (
+                              <button
+                                type="button"
+                                onClick={() => onToggleStatus(p)}
+                                disabled={isToggling}
+                                className={`rounded-md px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60 ${
+                                  isActive
+                                    ? "bg-red-500 hover:bg-red-600"
+                                    : "bg-green-600 hover:bg-green-700"
+                                }`}
+                              >
+                                {isToggling ? "Procesando..." : isActive ? "Deshabilitar" : "Habilitar"}
+                              </button>
+                            ) : null}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+            {filteredPersons.length === 0 && (
+              <p className="text-sm text-gray-500">No hay personas con esos filtros.</p>
+            )}
+            {statusMsg && (
+              <p className="mt-3 break-all text-xs text-gray-700">{statusMsg}</p>
+            )}
+          </section>
+        )}
+
+        {/* ── Tab: Certificaciones emitidas ── */}
+        {activeTab === "certificaciones" && (
+          <section className="pt-4 space-y-4">
+            {/* Filtros */}
+            <div className="flex flex-wrap gap-3">
+              <input
+                type="text"
+                placeholder="Filtrar por nombre..."
+                value={filterCert.nombre}
+                onChange={(e) => setFilterCert((f) => ({ ...f, nombre: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-40"
+              />
+              <input
+                type="text"
+                placeholder="Filtrar por apellido..."
+                value={filterCert.apellido}
+                onChange={(e) => setFilterCert((f) => ({ ...f, apellido: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-40"
+              />
+              <input
+                type="text"
+                placeholder="Filtrar por carrera..."
+                value={filterCert.carrera}
+                onChange={(e) => setFilterCert((f) => ({ ...f, carrera: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-44"
+              />
+              <input
+                type="text"
+                placeholder="Filtrar por año..."
+                value={filterCert.anio}
+                onChange={(e) => setFilterCert((f) => ({ ...f, anio: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary w-28"
+              />
+              <select
+                value={filterCert.estado}
+                onChange={(e) => setFilterCert((f) => ({ ...f, estado: e.target.value }))}
+                className="rounded-md border border-gray-300 px-3 py-1.5 text-sm outline-none focus:border-primary"
+              >
+                <option value="">Todos los estados</option>
+                <option value="Activa">Activa</option>
+                <option value="Revocada">Revocada</option>
+              </select>
+              {(filterCert.nombre || filterCert.apellido || filterCert.carrera || filterCert.estado || filterCert.anio) && (
+                <button
+                  type="button"
+                  onClick={() => setFilterCert({ nombre: "", apellido: "", carrera: "", estado: "", anio: "" })}
+                  className="rounded-md border border-gray-200 px-3 py-1.5 text-xs text-gray-500 hover:bg-gray-50"
+                >
+                  Limpiar filtros
+                </button>
+              )}
+            </div>
+
+            <div className="overflow-x-auto rounded-lg border border-gray-200">
+              <table className="min-w-full text-sm">
+                <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
+                  <tr>
+                    <th className="px-4 py-3 text-left">Pubkey</th>
+                    <th className="px-4 py-3 text-left">Titular</th>
+                    <th className="px-4 py-3 text-left">Carrera</th>
+                    <th className="px-4 py-3 text-left">Año</th>
+                    <th className="px-4 py-3 text-left">Estado</th>
+                    <th className="px-4 py-3 text-left">Acción</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-100">
+                  {filteredCertifications.map((c) => (
+                    <tr key={c.pubkey} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-mono text-xs" title={c.pubkey}>{shortAddress(c.pubkey)}</td>
+                      <td className="px-4 py-3">{c.nombre ?? ""} {c.apellido ?? ""}</td>
+                      <td className="px-4 py-3">{c.carrera ?? "-"}</td>
+                      <td className="px-4 py-3">{c.anio_egreso ?? "-"}</td>
+                      <td className="px-4 py-3"><StatusChip status={c.estado ?? ""} /></td>
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => onOpenCertificationDetail(c)}
+                            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+                          >
+                            Ver detalle
+                          </button>
+                          {c.estado === "Revocada" ? (
+                            <span className="text-xs text-gray-500">Ya revocada</span>
+                          ) : (
+                            <button
+                              type="button"
+                              onClick={() => onRevokeCertification(c)}
+                              disabled={revoking === c.pubkey}
+                              className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-60"
+                            >
+                              {revoking === c.pubkey ? "Revocando..." : "Revocar"}
+                            </button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {filteredCertifications.length === 0 && (
+              <p className="text-sm text-gray-500">No hay certificaciones con esos filtros.</p>
+            )}
+          </section>
+        )}
+      </div>
+
+      {(selectedCertificationLoading || selectedCertificationError || selectedCertification) && (
+        <CertificationDetailModal
+          cert={selectedCertificationDetail ?? selectedCertification}
+          loading={selectedCertificationLoading}
+          error={selectedCertificationError}
+          onClose={() => {
+            setSelectedCertification(null);
+            setSelectedCertificationDetail(null);
+            setSelectedCertificationError(null);
+            setSelectedCertificationLoading(false);
+          }}
+        />
+      )}
 
       {(selectedPersonLoading || selectedPersonError || selectedPerson) && (
         <PersonDetailModal
@@ -645,78 +987,6 @@ export default function AdminDashboard() {
           onSubmit={onSubmitEditPerson}
         />
       )}
-
-      <section>
-        <h2 className="text-lg font-semibold text-primary mb-3">Solicitudes de rol pendientes</h2>
-
-        {pendingRoleRequests.length === 0 ? (
-          <p className="text-sm text-gray-500">No hay solicitudes pendientes.</p>
-        ) : (
-          <div className="overflow-x-auto rounded-lg border border-gray-200">
-            <table className="min-w-full text-sm">
-              <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
-                <tr>
-                  <th className="px-4 py-3 text-left">Solicitante</th>
-                  <th className="px-4 py-3 text-left">Nombre</th>
-                  <th className="px-4 py-3 text-left">Referencia</th>
-                  <th className="px-4 py-3 text-left">Rol</th>
-                  <th className="px-4 py-3 text-left">Slot</th>
-                  <th className="px-4 py-3 text-left">Acción</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-100">
-                {pendingRoleRequests.map((r) => {
-                  const key = `${r.requester}:${r.role}`;
-                  const requesterPerson = personByWallet.get(r.requester);
-                  return (
-                    <tr key={key} className="hover:bg-gray-50">
-                      <td className="px-4 py-3 font-mono text-xs text-gray-600" title={r.requester}>{shortAddress(r.requester)}</td>
-                      <td className="px-4 py-3 text-gray-700">{requesterPerson?.nombre || "-"} {requesterPerson?.apellido || ""}</td>
-                      <td className="px-4 py-3 text-gray-700">
-                        <span className="text-xs text-gray-500">{roleContextLabel(r.role)}: </span>
-                        <span>{requesterPerson?.role_data || "Sin dato"}</span>
-                      </td>
-                      <td className="px-4 py-3"><RoleBadge role={r.role} /></td>
-                      <td className="px-4 py-3 text-gray-500">{r.slot}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            onClick={() => onOpenRequestDetail(r)}
-                            className="rounded-md border border-gray-300 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
-                          >
-                            Ver detalle
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onApprove(r)}
-                            disabled={approving === key}
-                            className="rounded-md bg-primary px-3 py-1.5 text-xs font-medium text-white disabled:opacity-60"
-                          >
-                            {approving === key ? "Aprobando..." : "Aprobar"}
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => onOpenRejectModal(r)}
-                            disabled={rejecting === key}
-                            className="rounded-md bg-red-500 px-3 py-1.5 text-xs font-medium text-white hover:bg-red-600 disabled:opacity-60"
-                          >
-                            {rejecting === key ? "Rechazando..." : "Rechazar"}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-
-        {approvalMsg && (
-          <p className="mt-3 break-all text-xs text-gray-700">{approvalMsg}</p>
-        )}
-      </section>
 
       {selectedRequest && (
         <RequestDetailModal
@@ -793,6 +1063,59 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function CertificationDetailModal({
+  cert,
+  loading,
+  error,
+  onClose,
+}: {
+  cert: Certification | null;
+  loading: boolean;
+  error: string | null;
+  onClose: () => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 px-4" onClick={onClose}>
+      <div
+        className="w-full max-w-2xl rounded-xl border border-gray-200 bg-white shadow-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center justify-between border-b border-gray-200 px-5 py-4">
+          <h3 className="text-base font-semibold text-primary">Detalle de certificación</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-md border border-gray-300 px-3 py-1.5 text-xs font-medium text-gray-700 hover:bg-gray-50"
+          >
+            Cerrar
+          </button>
+        </div>
+
+        <div className="space-y-3 px-5 py-4 text-sm text-gray-700">
+          {loading && <p className="animate-pulse text-gray-500">Cargando detalle...</p>}
+          {error && <p className="text-red-600">{error}</p>}
+
+          {!loading && !error && cert && (
+            <div className="rounded-lg border border-gray-200 bg-gray-50 p-3 space-y-2">
+              <p><strong>Titular:</strong> {cert.nombre ?? "-"} {cert.apellido ?? ""}</p>
+              <p><strong>DNI:</strong> {cert.dni ?? "-"}</p>
+              <p><strong>Carrera:</strong> {cert.carrera ?? "-"}</p>
+              <p><strong>Año de egreso:</strong> {cert.anio_egreso ?? "-"}</p>
+              <p><strong>Estado:</strong> {cert.estado ?? "-"}</p>
+              <p><strong>Universidad:</strong> {cert.universidad ?? "-"}</p>
+              <p><strong>Token cert.:</strong> {cert.cert_token ?? "-"}</p>
+              <p className="break-all"><strong>Pubkey:</strong> {cert.pubkey}</p>
+              <p className="break-all"><strong>Hash datos:</strong> {cert.hash_datos ?? "-"}</p>
+              <p><strong>Motivo revocación:</strong> {cert.motivo_revocacion ?? "-"}</p>
+              <p><strong>Actualizado:</strong> {cert.updated_at ? new Date(cert.updated_at * 1000).toLocaleString() : "-"}</p>
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

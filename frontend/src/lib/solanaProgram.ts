@@ -202,6 +202,7 @@ const IDL_MIN = {
       accounts: [
         { name: "universidad_person" },
         { name: "cert_token", writable: true },
+        { name: "token_request" },
         { name: "certification", writable: true },
         { name: "universidad", writable: true, signer: true },
         { name: "system_program", address: "11111111111111111111111111111111" },
@@ -983,11 +984,27 @@ export async function assignTokenTx(params: {
   const program = buildProgram(connection, wallet);
   const certification = certificationPda(certToken);
 
-  // Compatibilidad: si la UI no pasa tokenRequest, se obtiene desde la cuenta CertificationToken.
+  // Compatibilidad: si la UI no pasa tokenRequest, se obtiene parseando la cuenta CertificationToken on-chain.
   let tokenRequest = params.tokenRequest;
   if (!tokenRequest) {
-    const tokenAccount = await (program as any).account.certificationToken.fetch(certToken);
-    tokenRequest = new PublicKey(tokenAccount.tokenRequest);
+    const tokenAccount = await (connection as Connection).getAccountInfo(certToken, "confirmed");
+    if (!tokenAccount?.data || tokenAccount.data.length < 8 + 32 + 4 + 1 + 32 + 4 + 1) {
+      throw new Error("No se pudo leer la cuenta del token de certificacion para resolver la solicitud.");
+    }
+
+    const data =
+      tokenAccount.data instanceof Uint8Array
+        ? tokenAccount.data
+        : Uint8Array.from(tokenAccount.data);
+
+    let offset = 8; // discriminator
+    offset += 32; // universidad
+    const [, afterCarrera] = readString(data, offset); // carrera
+    offset = afterCarrera;
+    offset += 1; // estado
+
+    const tokenRequestBytes = data.subarray(offset, offset + 32);
+    tokenRequest = new PublicKey(tokenRequestBytes);
   }
 
   return rpcWithExtendedTimeout(connection, () =>
@@ -1002,6 +1019,113 @@ export async function assignTokenTx(params: {
         systemProgram: SystemProgram.programId,
       })
       .rpc()
+  );
+}
+
+export async function emitAndAssignForeignTx(params: {
+  connection: unknown;
+  wallet: unknown;
+  ministerio: PublicKey;
+  id: bigint;
+  carrera: string;
+  plan: string;
+  resolucion: string;
+  anioEgreso: number;
+  nombre: string;
+  apellido: string;
+  dni: string;
+  walletTitular: string;
+  tipo: string | null;
+  pais: string | null;
+}): Promise<string> {
+  const {
+    connection,
+    wallet,
+    ministerio,
+    id,
+    carrera,
+    plan,
+    resolucion,
+    anioEgreso,
+    nombre,
+    apellido,
+    dni,
+    walletTitular,
+    tipo,
+    pais,
+  } = params;
+
+  const program = buildProgram(connection, wallet);
+  const tokenRequest = tokenRequestPda(ministerio, id);
+  const certToken = certTokenPda(tokenRequest, 0);
+  const certification = certificationPda(certToken);
+  const idBn = new BN(id.toString());
+
+  const hashDatos = await sha256FromText(
+    JSON.stringify({
+      nombre,
+      apellido,
+      dni,
+      wallet: walletTitular,
+      tipo,
+      pais,
+      carrera,
+      plan,
+      resolucion,
+      anioEgreso,
+    })
+  );
+
+  const requestIx = await (program as any).methods
+    .requestTokens(idBn, carrera, plan, resolucion, anioEgreso, 1)
+    .accounts({
+      solicitantePerson: personPda(ministerio),
+      tokenRequest,
+      solicitante: ministerio,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+
+  const approveIx = await (program as any).methods
+    .approveTokenRequest()
+    .accounts({
+      ministerioPerson: personPda(ministerio),
+      ministerio,
+      tokenRequest,
+    })
+    .instruction();
+
+  const mintIx = await (program as any).methods
+    .mintToken(0)
+    .accounts({
+      universidadPerson: personPda(ministerio),
+      tokenRequest,
+      certToken,
+      universidad: ministerio,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+
+  const assignIx = await (program as any).methods
+    .assignTokenToGraduate(nombre, apellido, dni, Array.from(hashDatos))
+    .accounts({
+      universidadPerson: personPda(ministerio),
+      certToken,
+      tokenRequest,
+      certification,
+      universidad: ministerio,
+      systemProgram: SystemProgram.programId,
+    })
+    .instruction();
+
+  const tx = new Transaction();
+  tx.add(ComputeBudgetProgram.setComputeUnitLimit({ units: 1_400_000 }));
+  tx.add(requestIx, approveIx, mintIx, assignIx);
+
+  return rpcWithExtendedTimeout(connection, () =>
+    (program.provider as AnchorProvider).sendAndConfirm(tx, [], {
+      commitment: "confirmed",
+    })
   );
 }
 

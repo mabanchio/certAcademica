@@ -6,6 +6,7 @@ import { getDb } from "./db";
 import { handleEvent } from "./handlers";
 
 const PROGRAM_ID = new PublicKey(config.programId);
+type ProgramAccounts = Awaited<ReturnType<Connection["getProgramAccounts"]>>;
 
 // Intenta cargar el IDL compilado por `anchor build`; si no existe usa el
 // IDL interno. Esto garantiza que el indexador funcione en cualquier etapa.
@@ -41,8 +42,12 @@ export class Listener {
   async start(): Promise<void> {
     console.log(`[Listener] Conectando a ${config.rpcUrl} | programa ${config.programId}`);
     await this.bootstrapAdminFromConfig();
-    await this.bootstrapPersonsFromChain();
-    await this.bootstrapCertificationsFromChain();
+    const programAccounts = await this.connection.getProgramAccounts(PROGRAM_ID, {
+      commitment: "confirmed",
+    });
+    console.log(`[Listener] Cuentas del programa detectadas: ${programAccounts.length}`);
+    await this.bootstrapPersonsFromChain(programAccounts);
+    await this.bootstrapCertificationsFromChain(programAccounts);
     await this.syncHistorical();
     this.subscribeWs();
     this.startPollFallback();
@@ -97,13 +102,14 @@ export class Listener {
     }
   }
 
-  private async bootstrapPersonsFromChain(): Promise<void> {
+  private async bootstrapPersonsFromChain(accounts?: ProgramAccounts): Promise<void> {
     try {
       const db = getDb();
-      const accounts = await this.connection.getProgramAccounts(PROGRAM_ID, {
-        commitment: "confirmed",
-      });
-      console.log(`[Listener] Cuentas del programa detectadas: ${accounts.length}`);
+      const sourceAccounts =
+        accounts ??
+        (await this.connection.getProgramAccounts(PROGRAM_ID, {
+          commitment: "confirmed",
+        }));
 
       const upsertPerson = db.prepare(`
         INSERT INTO persons (wallet, nombre, apellido, dni, status, roles, role_data, updated_at)
@@ -121,7 +127,7 @@ export class Listener {
       let count = 0;
       const now = Date.now();
 
-      for (const acc of accounts) {
+      for (const acc of sourceAccounts) {
         try {
           const person = this.coder.accounts.decode("PersonAccount", acc.account.data) as {
             wallet: { toBase58?: () => string } | string;
@@ -131,6 +137,7 @@ export class Listener {
             status?: unknown;
             roles?: unknown[];
             roleData?: string;
+            role_data?: string;
           };
 
           const wallet =
@@ -152,7 +159,7 @@ export class Listener {
             person.dni ?? "",
             status || "Activo",
             JSON.stringify(roles),
-            person.roleData ?? "",
+            person.roleData ?? person.role_data ?? "",
             now
           );
 
@@ -168,14 +175,16 @@ export class Listener {
     }
   }
 
-  private async bootstrapCertificationsFromChain(): Promise<void> {
+  private async bootstrapCertificationsFromChain(accounts?: ProgramAccounts): Promise<void> {
     try {
       const db = getDb();
-      const accounts = await this.connection.getProgramAccounts(PROGRAM_ID, { commitment: "confirmed" });
+      const sourceAccounts =
+        accounts ??
+        (await this.connection.getProgramAccounts(PROGRAM_ID, { commitment: "confirmed" }));
       const now = Date.now();
       let count = 0;
 
-      for (const acc of accounts) {
+      for (const acc of sourceAccounts) {
         try {
           const cert = this.coder.accounts.decode("Certification", acc.account.data) as {
             certToken?: unknown;
@@ -270,6 +279,7 @@ export class Listener {
         status?: unknown;
         roles?: unknown[];
         roleData?: string;
+        role_data?: string;
       };
 
       const personWallet = this.asBase58(person.wallet) ?? wallet;
@@ -296,7 +306,7 @@ export class Listener {
         person.dni ?? "",
         status,
         JSON.stringify(roles),
-        person.roleData ?? "",
+        person.roleData ?? person.role_data ?? "",
         Date.now()
       );
     } catch (err) {
@@ -367,7 +377,7 @@ export class Listener {
           });
           const slot = tx?.slot ?? 0;
           const blockTime = tx?.blockTime ?? null;
-          await this.processTx(logs.signature, slot, blockTime);
+          await this.processTx(logs.signature, slot, blockTime, tx?.meta?.logMessages ?? null);
         } catch (err) {
           console.error("[Listener] Error procesando tx via WS:", err);
         }
@@ -386,12 +396,18 @@ export class Listener {
           limit: 25,
         });
         const db = getDb();
+        const validSignatures = sigs.filter((s) => !s.err).map((s) => s.signature);
+        if (validSignatures.length === 0) return;
+
+        const placeholders = validSignatures.map(() => "?").join(",");
+        const seenRows = db
+          .prepare(`SELECT signature FROM processed_sigs WHERE signature IN (${placeholders})`)
+          .all(...validSignatures) as Array<{ signature: string }>;
+        const seen = new Set(seenRows.map((r) => r.signature));
+
         for (const sigInfo of sigs) {
           if (sigInfo.err) continue;
-          const exists = db
-            .prepare("SELECT 1 FROM processed_sigs WHERE signature = ?")
-            .get(sigInfo.signature);
-          if (!exists) {
+          if (!seen.has(sigInfo.signature)) {
             await this.processTx(sigInfo.signature, sigInfo.slot, sigInfo.blockTime ?? null);
           }
         }
@@ -406,7 +422,8 @@ export class Listener {
   private async processTx(
     signature: string,
     slot: number,
-    blockTime: number | null
+    blockTime: number | null,
+    logMessages?: readonly string[] | null
   ): Promise<void> {
     const db = getDb();
 
@@ -416,17 +433,21 @@ export class Listener {
     if (alreadyProcessed) return;
 
     try {
-      const tx = await this.connection.getTransaction(signature, {
-        commitment: "confirmed",
-        maxSupportedTransactionVersion: 0,
-      });
+      let logs = logMessages ?? null;
+      if (!logs) {
+        const tx = await this.connection.getTransaction(signature, {
+          commitment: "confirmed",
+          maxSupportedTransactionVersion: 0,
+        });
+        logs = tx?.meta?.logMessages ?? null;
+      }
 
-      if (!tx?.meta?.logMessages) {
+      if (!logs) {
         this.markProcessed(signature, slot);
         return;
       }
 
-      const events = [...this.parser.parseLogs(tx.meta.logMessages)];
+      const events = [...this.parser.parseLogs(Array.from(logs))];
       await this.hydratePersonsFromEvents(events as Array<{ name: string; data: unknown }>);
 
       const insertEvent = db.prepare(`

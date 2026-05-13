@@ -39,6 +39,7 @@ export function Navbar() {
   const nav = connected
     ? [
         { href: "/dashboard", label: "Inicio" },
+        { href: "/verify", label: "Verificación pública" },
         ...(isAdmin ? [{ href: "/audit", label: "Auditoría" }] : []),
       ]
     : [];

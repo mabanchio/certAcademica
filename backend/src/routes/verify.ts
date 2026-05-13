@@ -2,9 +2,27 @@ import { Router } from "express";
 import { verifyLimiter } from "../middleware/rateLimiter";
 import { asyncHandler, createError } from "../middleware/errorHandler";
 import { isValidPublicKey, isValidSha256Hex, allowedBodyFields } from "../middleware/validation";
-import { verifyCertification } from "../db";
+import { searchCertificationsByIdentity, verifyCertification } from "../db";
 
 const router = Router();
+
+// GET /verify/search?nombre=&apellido=&dni= — búsqueda pública por identidad
+router.get(
+  "/search",
+  verifyLimiter,
+  asyncHandler(async (req, res, next) => {
+    const nombre = typeof req.query.nombre === "string" ? req.query.nombre : "";
+    const apellido = typeof req.query.apellido === "string" ? req.query.apellido : "";
+    const dni = typeof req.query.dni === "string" ? req.query.dni : "";
+
+    if (!nombre.trim() && !apellido.trim() && !dni.trim()) {
+      return next(createError("Debes indicar al menos uno de: nombre, apellido o dni", 400));
+    }
+
+    const data = searchCertificationsByIdentity({ nombre, apellido, dni, limit: 100 });
+    res.json({ data });
+  })
+);
 
 // POST /verify — verifica la autenticidad de una certificación
 //

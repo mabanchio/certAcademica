@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { api, type AuditEntry, type EventRow, type GraduateRequest, type Person } from "@/lib/api";
+import { BASE, api, type AuditEntry, type EventRow, type GraduateRequest, type Person } from "@/lib/api";
 import { approveForeignTx, fetchPersonIdentityOnChain, rejectForeignTx } from "@/lib/solanaProgram";
 
 type Tab = "solicitudes" | "actividad";
@@ -37,6 +37,22 @@ function extractRequesterWallet(events: EventRow[]): string | null {
   return null;
 }
 
+function resolveRequestCountry(request: GraduateRequest): string {
+  const direct = (request.pais ?? "").trim();
+  if (direct.length > 0) return direct;
+  const fromTitle = (request.titulo_pais ?? "").trim();
+  return fromTitle;
+}
+
+function activityOutcome(entry: AuditEntry): string {
+  const reason = (entry.motivo ?? "").trim();
+  if (reason.length > 0) return reason;
+  if (entry.accion === "ApproveForeign") return "Aprobada (sin motivo requerido)";
+  if (entry.accion === "DeriveCancilleria") return "Derivada a Cancilleria";
+  if (entry.accion === "RejectForeign") return "Rechazada (sin detalle)";
+  return "Sin detalle";
+}
+
 export default function CancilleriaDashboard() {
   const { connection } = useConnection();
   const anchorWallet = useAnchorWallet();
@@ -58,6 +74,7 @@ export default function CancilleriaDashboard() {
   const [selectedActivity, setSelectedActivity] = useState<AuditEntry | null>(null);
   const [selectedActivityActor, setSelectedActivityActor] = useState<Person | null>(null);
   const [selectedActivityRequester, setSelectedActivityRequester] = useState<Person | null>(null);
+  const [selectedActivityRequest, setSelectedActivityRequest] = useState<GraduateRequest | null>(null);
   const [selectedActivityEvents, setSelectedActivityEvents] = useState<EventRow[]>([]);
   const [selectedActivityError, setSelectedActivityError] = useState<string | null>(null);
   const [selectedActivityLoading, setSelectedActivityLoading] = useState(false);
@@ -179,7 +196,11 @@ export default function CancilleriaDashboard() {
     }
 
     let matchedAudit: AuditEntry | null = null;
+    let deriveAudit: AuditEntry | null = null;
     if (auditResult.status === "fulfilled" && request.pubkey) {
+      deriveAudit = auditResult.value.data.find(
+        (entry) => entry.entidad === request.pubkey && entry.accion === "DeriveCancilleria"
+      ) ?? null;
       matchedAudit = auditResult.value.data.find(
         (entry) => entry.entidad === request.pubkey && ["DeriveCancilleria", "ApproveForeign", "RejectForeign"].includes(entry.accion)
       ) ?? null;
@@ -191,7 +212,17 @@ export default function CancilleriaDashboard() {
       ]);
 
       if (eventsResult.status === "fulfilled") setSelectedRequestEvents(eventsResult.value.data);
-      setSelectedRequestResolver(peopleByWallet[matchedAudit.actor] ?? null);
+      const resolverWallet = deriveAudit?.actor ?? matchedAudit.actor;
+      setSelectedRequestResolver(peopleByWallet[resolverWallet] ?? null);
+
+      if (!(peopleByWallet[resolverWallet] ?? null)) {
+        try {
+          const resolver = await api.getPerson(resolverWallet);
+          setSelectedRequestResolver(resolver.data);
+        } catch {
+          // no-op
+        }
+      }
     }
 
     if (!(peopleByWallet[request.wallet] ?? null) && !matchedAudit) {
@@ -205,23 +236,78 @@ export default function CancilleriaDashboard() {
     setSelectedActivity(entry);
     setSelectedActivityActor(peopleByWallet[entry.actor] ?? null);
     setSelectedActivityRequester(null);
+    setSelectedActivityRequest(null);
     setSelectedActivityEvents([]);
     setSelectedActivityError(null);
     setSelectedActivityLoading(true);
 
-    const [eventsResult] = await Promise.allSettled([
+    const [eventsResult, requestResult] = await Promise.allSettled([
       api.getTransactionBySignature(entry.signature),
+      api.getGraduateRequestByPubkey(entry.entidad),
     ]);
 
     const events = eventsResult.status === "fulfilled" ? eventsResult.value.data : [];
     if (eventsResult.status === "fulfilled") setSelectedActivityEvents(events);
 
-    const requesterWallet = extractRequesterWallet(events);
-    if (requesterWallet) {
-      setSelectedActivityRequester(peopleByWallet[requesterWallet] ?? null);
+    const resolveRequesterByWallet = async (wallet: string): Promise<Person | null> => {
+      let requester: Person | null = peopleByWallet[wallet] ?? null;
+
+      if (!requester) {
+        try {
+          const personResult = await api.getPersonByWallet(wallet);
+          requester = personResult.data as Person | null;
+        } catch {
+          // no-op: se intenta fallback on-chain
+        }
+      }
+
+      try {
+        const onChain = await fetchPersonIdentityOnChain({
+          connection,
+          wallet: new PublicKey(wallet),
+        });
+
+        if (onChain) {
+          requester = {
+            wallet,
+            nombre: requester?.nombre ?? onChain.nombre ?? null,
+            apellido: requester?.apellido ?? onChain.apellido ?? null,
+            dni: requester?.dni ?? onChain.dni ?? null,
+            status: requester?.status ?? null,
+            roles: requester?.roles ?? [],
+            role_data: requester?.role_data ?? null,
+            updated_at: requester?.updated_at ?? null,
+          };
+        }
+      } catch {
+        // no-op
+      }
+
+      return requester;
+    };
+
+    // Cargar datos completos de la solicitud
+    let loadedRequest: GraduateRequest | null = null;
+    if (requestResult.status === "fulfilled" && requestResult.value.data) {
+      loadedRequest = requestResult.value.data;
+      setSelectedActivityRequest(loadedRequest);
+      const requesterWallet = loadedRequest.wallet;
+      if (requesterWallet) {
+        const requester = await resolveRequesterByWallet(requesterWallet);
+        setSelectedActivityRequester(requester);
+      }
     }
 
-    if (eventsResult.status === "rejected") {
+    // Fallback: intentar extraer wallet de los eventos si no se cargó la solicitud
+    if (!loadedRequest && eventsResult.status === "fulfilled") {
+      const requesterWallet = extractRequesterWallet(events);
+      if (requesterWallet) {
+        const requester = await resolveRequesterByWallet(requesterWallet);
+        setSelectedActivityRequester(requester);
+      }
+    }
+
+    if (eventsResult.status === "rejected" && requestResult.status === "rejected") {
       setSelectedActivityError("No se pudo cargar el detalle de la actividad.");
     }
 
@@ -231,7 +317,8 @@ export default function CancilleriaDashboard() {
   const countryOptions = useMemo(() => {
     const values = new Set<string>();
     for (const r of requests) {
-      if (r.pais && r.pais.trim().length > 0) values.add(r.pais.trim());
+      const country = resolveRequestCountry(r);
+      if (country.length > 0) values.add(country);
     }
     return [...values].sort((a, b) => a.localeCompare(b, "es"));
   }, [requests]);
@@ -241,13 +328,14 @@ export default function CancilleriaDashboard() {
     return requests.filter((r) => {
       const person = peopleByWallet[r.wallet];
       const name = displayName(person).toLowerCase();
+      const country = resolveRequestCountry(r);
       const matchSearch =
         q.length === 0 ||
         name.includes(q) ||
         r.wallet.toLowerCase().includes(q) ||
         (r.tipo ?? "").toLowerCase().includes(q) ||
-        (r.pais ?? "").toLowerCase().includes(q);
-      const matchCountry = requestCountryFilter.length === 0 || (r.pais ?? "") === requestCountryFilter;
+        country.toLowerCase().includes(q);
+      const matchCountry = requestCountryFilter.length === 0 || country === requestCountryFilter;
       return matchSearch && matchCountry;
     });
   }, [requests, peopleByWallet, requestSearch, requestCountryFilter]);
@@ -260,11 +348,13 @@ export default function CancilleriaDashboard() {
     const q = activitySearch.trim().toLowerCase();
     return audit.filter((e) => {
       const matchAction = activityActionFilter.length === 0 || e.accion === activityActionFilter;
+      const outcome = activityOutcome(e).toLowerCase();
       const matchSearch =
         q.length === 0 ||
         e.accion.toLowerCase().includes(q) ||
         e.entidad.toLowerCase().includes(q) ||
-        e.signature.toLowerCase().includes(q);
+        e.signature.toLowerCase().includes(q) ||
+        outcome.includes(q);
       return matchAction && matchSearch;
     });
   }, [audit, activitySearch, activityActionFilter]);
@@ -278,7 +368,7 @@ export default function CancilleriaDashboard() {
 
       <div className="border-b border-gray-200 flex gap-1 overflow-x-auto">
         {[
-          { key: "solicitudes", label: "Solicitudes extranjeras" },
+          { key: "solicitudes", label: "Solicitudes extranjeras", count: requests.length },
           { key: "actividad", label: "Mi actividad" },
         ].map((t) => (
           <button
@@ -289,6 +379,11 @@ export default function CancilleriaDashboard() {
             }`}
           >
             {t.label}
+            {typeof t.count === "number" && t.count > 0 && (
+              <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5">
+                {t.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
@@ -346,7 +441,7 @@ export default function CancilleriaDashboard() {
                     <td className="px-4 py-3 font-mono text-xs" title={r.wallet}>{shortKey(r.wallet)}</td>
                     <td className="px-4 py-3">{displayName(requester)}</td>
                     <td className="px-4 py-3">{r.tipo ?? "-"}</td>
-                    <td className="px-4 py-3">{r.pais ?? "-"}</td>
+                    <td className="px-4 py-3">{resolveRequestCountry(r) || "-"}</td>
                     <td className="px-4 py-3">
                       <div className="flex gap-2">
                         <button
@@ -397,7 +492,7 @@ export default function CancilleriaDashboard() {
               type="text"
               value={activitySearch}
               onChange={(e) => setActivitySearch(e.target.value)}
-              placeholder="Filtrar por acción, entidad o firma"
+              placeholder="Filtrar por accion, entidad, resultado o firma"
               className="min-w-[240px] flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary"
             />
             <select
@@ -416,8 +511,8 @@ export default function CancilleriaDashboard() {
             <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
               <tr>
                 <th className="px-4 py-3 text-left">Acción</th>
-                <th className="px-4 py-3 text-left">Actor</th>
-                <th className="px-4 py-3 text-left">Motivo</th>
+                <th className="px-4 py-3 text-left">Entidad</th>
+                <th className="px-4 py-3 text-left">Resultado</th>
                 <th className="px-4 py-3 text-left">Fecha</th>
                 <th className="px-4 py-3 text-left">Detalle</th>
               </tr>
@@ -426,10 +521,10 @@ export default function CancilleriaDashboard() {
               {filteredAudit.map((e) => (
                 <tr key={e.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium">{e.accion}</td>
-                  <td className="px-4 py-3 font-mono text-xs text-gray-500 truncate max-w-[140px]">
-                    {shortKey(e.actor)}
+                  <td className="px-4 py-3 font-mono text-xs text-gray-500 truncate max-w-[140px]" title={e.entidad}>
+                    {shortKey(e.entidad)}
                   </td>
-                  <td className="px-4 py-3 text-gray-600">{e.motivo || "—"}</td>
+                  <td className="px-4 py-3 text-gray-600">{activityOutcome(e)}</td>
                   <td className="px-4 py-3 text-gray-500 whitespace-nowrap">
                     {new Date(e.timestamp * 1000).toLocaleString("es-AR")}
                   </td>
@@ -479,7 +574,7 @@ export default function CancilleriaDashboard() {
         <TransactionDetailModal
           title="Detalle de actividad"
           auditEntry={selectedActivity}
-          request={null}
+          request={selectedActivityRequest}
           requester={selectedActivityRequester}
           resolver={selectedActivityActor}
           events={selectedActivityEvents}
@@ -489,6 +584,7 @@ export default function CancilleriaDashboard() {
             setSelectedActivity(null);
             setSelectedActivityActor(null);
             setSelectedActivityRequester(null);
+            setSelectedActivityRequest(null);
             setSelectedActivityEvents([]);
             setSelectedActivityError(null);
             setSelectedActivityLoading(false);
@@ -636,8 +732,35 @@ function TransactionDetailModal({
                 <p><strong>Resolvió:</strong> {displayName(resolver)}</p>
                 <p className="break-all"><strong>Wallet resolvió:</strong> {resolver?.wallet ?? auditEntry?.actor ?? "-"}</p>
                 <p><strong>Tipo:</strong> {request?.tipo ?? "-"}</p>
-                <p><strong>País:</strong> {request?.pais ?? "-"}</p>
+                <p><strong>País:</strong> {request ? resolveRequestCountry(request) || "-" : "-"}</p>
                 <p><strong>Estado:</strong> {request?.estado ?? "-"}</p>
+                <p><strong>Título:</strong> {request?.titulo_nombre ?? "-"}</p>
+                <p><strong>Carrera título:</strong> {request?.titulo_carrera ?? "-"}</p>
+                <p><strong>Institución título:</strong> {request?.titulo_institucion ?? "-"}</p>
+                <p><strong>Año título:</strong> {request?.titulo_anio ?? "-"}</p>
+                <p><strong>País título:</strong> {request?.titulo_pais ?? "-"}</p>
+                <p><strong>Observaciones título:</strong> {request?.titulo_observaciones ?? "-"}</p>
+                <p>
+                  <strong>PDF:</strong>{" "}
+                  {request?.pdf_url ? (
+                    <a
+                      href={`${BASE}${request.pdf_url}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary underline"
+                    >
+                      {request.pdf_file_name ?? "Ver PDF"}
+                    </a>
+                  ) : (
+                    "No cargado"
+                  )}
+                </p>
+                <p>
+                  <strong>Ministerio derivador:</strong>{" "}
+                  {request?.ministerio_derivador_nombre || request?.ministerio_derivador_apellido
+                    ? `${request?.ministerio_derivador_nombre ?? ""} ${request?.ministerio_derivador_apellido ?? ""}`.trim()
+                    : displayName(resolver)}
+                </p>
                 <p><strong>Observaciones rechazo:</strong> {rejectReason ?? "-"}</p>
                 <p className="break-all"><strong>Entidad (PDA):</strong> {auditEntry?.entidad ?? request?.pubkey ?? "-"}</p>
                 <p className="break-all"><strong>Signature:</strong> {txSignature ?? "-"}</p>

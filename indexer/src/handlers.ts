@@ -15,12 +15,27 @@ function ts(value: unknown): number {
 }
 
 function enumName(value: unknown): string {
-  if (typeof value === "string") return value;
+  const normalizeEnumString = (raw: string): string => {
+    const trimmed = raw.trim();
+    if (!trimmed) return trimmed;
+
+    if (trimmed.includes("_")) {
+      return trimmed
+        .split("_")
+        .filter(Boolean)
+        .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+        .join("");
+    }
+
+    return trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
+  };
+
+  if (typeof value === "string") return normalizeEnumString(value);
   if (value && typeof value === "object") {
     const keys = Object.keys(value as object);
-    if (keys.length > 0) return keys[0];
+    if (keys.length > 0) return normalizeEnumString(keys[0]);
   }
-  return String(value);
+  return normalizeEnumString(String(value));
 }
 
 // ── Dispatcher principal ──────────────────────────────────────────────────
@@ -188,28 +203,37 @@ export function handleEvent(name: string, data: any, signature: string): void {
     // ── Solicitudes de graduación ────────────────────────────────────────
 
     case "CertificationRequestedEvent":
+      {
+      const graduateRequest = data.graduateRequest ?? data.graduate_request;
+      const wallet = data.wallet;
+      const tipo = data.tipo;
       db.prepare(`
         INSERT OR REPLACE INTO graduate_requests
           (pubkey, wallet, tipo, estado, updated_at)
         VALUES (?, ?, ?, 'Pendiente', ?)
       `).run(
-        pk(data.graduateRequest),
-        pk(data.wallet),
-        enumName(data.tipo),
+        pk(graduateRequest),
+        pk(wallet),
+        enumName(tipo),
         ts(data.timestamp)
       );
+      }
       break;
 
     case "GraduateRequestResolvedEvent":
+      {
+      const graduateRequest = data.graduateRequest ?? data.graduate_request;
+      const nuevoEstado = data.nuevoEstado ?? data.nuevo_estado;
       db.prepare(`
         UPDATE graduate_requests SET estado = ?, motivo = ?, updated_at = ?
         WHERE pubkey = ?
       `).run(
-        enumName(data.nuevoEstado),
+        enumName(nuevoEstado),
         data.motivo ?? "",
         ts(data.timestamp),
-        pk(data.graduateRequest)
+        pk(graduateRequest)
       );
+      }
       break;
 
     // ── Auditoría ────────────────────────────────────────────────────────
@@ -232,7 +256,7 @@ export function handleEvent(name: string, data: any, signature: string): void {
       }
 
       db.prepare(`
-        INSERT INTO audit_entries (signature, actor, accion, entidad, motivo, timestamp)
+        INSERT OR IGNORE INTO audit_entries (signature, actor, accion, entidad, motivo, timestamp)
         VALUES (?, ?, ?, ?, ?, ?)
       `).run(
         signature,

@@ -4,7 +4,7 @@ import Database from "better-sqlite3";
 import fs from "fs";
 import path from "path";
 import { config } from "./config";
-import { fetchOnChainCertification } from "./solana";
+import { fetchOnChainCertification, fetchOnChainPersonRoleData } from "./solana";
 
 let _db: Database.Database | null = null;
 
@@ -62,6 +62,7 @@ export interface GraduateRequestRow {
   pubkey: string;
   wallet: string;
   tipo: string | null;
+  pdf_hash: string | null;
   estado: string | null;
   motivo: string | null;
   pais: string | null;
@@ -177,10 +178,61 @@ export function getCertificationsByUniversidad(universidad: string, limit: numbe
     .all(universidad, limit, offset) as Record<string, unknown>[]).map((r) => sanitizeCertification(r));
 }
 
+export function getCertificationsByEgresadoWallet(wallet: string, limit: number, offset: number): CertificationRow[] {
+  const person = getPersonByWallet(wallet);
+  const dni = (person?.dni ?? "").trim();
+  if (!dni) return [];
+
+  return (getDb()
+    .prepare("SELECT * FROM certifications WHERE dni = ? ORDER BY updated_at DESC LIMIT ? OFFSET ?")
+    .all(dni, limit, offset) as Record<string, unknown>[]).map((r) => sanitizeCertification(r));
+}
+
 export function getActiveCertifications(limit: number, offset: number): CertificationRow[] {
   return (getDb()
     .prepare("SELECT * FROM certifications WHERE estado = 'Activa' ORDER BY updated_at DESC LIMIT ? OFFSET ?")
     .all(limit, offset) as Record<string, unknown>[]).map((r) => sanitizeCertification(r));
+}
+
+export function searchCertificationsByIdentity(params: {
+  nombre?: string;
+  apellido?: string;
+  dni?: string;
+  limit?: number;
+}): CertificationRow[] {
+  const nombre = (params.nombre ?? "").trim().toLowerCase();
+  const apellido = (params.apellido ?? "").trim().toLowerCase();
+  const dni = (params.dni ?? "").trim();
+  const limit = Math.min(Math.max(params.limit ?? 50, 1), 100);
+
+  const where: string[] = [];
+  const values: Array<string | number> = [];
+
+  if (nombre) {
+    where.push("LOWER(COALESCE(nombre, '')) LIKE ?");
+    values.push(`%${nombre}%`);
+  }
+  if (apellido) {
+    where.push("LOWER(COALESCE(apellido, '')) LIKE ?");
+    values.push(`%${apellido}%`);
+  }
+  if (dni) {
+    where.push("dni = ?");
+    values.push(dni);
+  }
+
+  if (where.length === 0) return [];
+
+  const sql = `
+    SELECT *
+    FROM certifications
+    WHERE ${where.join(" AND ")}
+    ORDER BY updated_at DESC
+    LIMIT ?
+  `;
+  values.push(limit);
+
+  return (getDb().prepare(sql).all(...values) as Record<string, unknown>[]).map((r) => sanitizeCertification(r));
 }
 
 // ── Solicitudes de tokens ─────────────────────────────────────────────────
@@ -221,7 +273,7 @@ export function getTokenRequestsByStatus(estado: string, limit: number, offset: 
 
 export function getGraduateRequestsByStatus(estado: string, limit: number, offset: number): GraduateRequestRow[] {
   return getDb()
-    .prepare("SELECT * FROM graduate_requests WHERE estado = ? ORDER BY updated_at ASC LIMIT ? OFFSET ?")
+    .prepare("SELECT * FROM graduate_requests WHERE LOWER(estado) = LOWER(?) ORDER BY updated_at ASC LIMIT ? OFFSET ?")
     .all(estado, limit, offset) as GraduateRequestRow[];
 }
 
@@ -231,17 +283,25 @@ export function getGraduateRequestByWallet(wallet: string): GraduateRequestRow |
     .get(wallet) as GraduateRequestRow | undefined) ?? null;
 }
 
+export function getGraduateRequestByPubkey(pubkey: string): GraduateRequestRow | null {
+  return (getDb()
+    .prepare("SELECT * FROM graduate_requests WHERE pubkey = ? LIMIT 1")
+    .get(pubkey) as GraduateRequestRow | undefined) ?? null;
+}
+
 export function getAvailableCertTokens(universidad: string): Array<{ cert_token_pubkey: string; timestamp: number }> {
   // cert_tokens acuñados por esta universidad que aún no están asignados (no aparecen en certifications)
+  // DISTINCT para evitar duplicados si hay múltiples audit entries para el mismo token
   return getDb().prepare(`
-    SELECT ae.entidad AS cert_token_pubkey, ae.timestamp
+    SELECT DISTINCT ae.entidad AS cert_token_pubkey, MAX(ae.timestamp) AS timestamp
     FROM audit_entries ae
     WHERE ae.actor = ? AND ae.accion = 'MintToken'
       AND ae.entidad NOT IN (
-        SELECT cert_token FROM certifications WHERE cert_token IS NOT NULL AND universidad = ?
+        SELECT DISTINCT cert_token FROM certifications WHERE cert_token IS NOT NULL
       )
-    ORDER BY ae.timestamp DESC
-  `).all(universidad, universidad) as Array<{ cert_token_pubkey: string; timestamp: number }>;
+    GROUP BY ae.entidad
+    ORDER BY timestamp DESC
+  `).all(universidad) as Array<{ cert_token_pubkey: string; timestamp: number }>;
 }
 
 // ── Eventos / Transacciones ───────────────────────────────────────────────
@@ -310,7 +370,21 @@ export async function verifyCertification(pubkey: string, expectedHash?: string)
   }
 
   const auditHistory = getDb()
-    .prepare("SELECT * FROM audit_entries WHERE entidad = ? ORDER BY timestamp DESC LIMIT 20")
+    .prepare(`
+      SELECT
+        MIN(id) AS id,
+        signature,
+        actor,
+        accion,
+        entidad,
+        motivo,
+        timestamp
+      FROM audit_entries
+      WHERE entidad = ?
+      GROUP BY signature, actor, accion, entidad, COALESCE(motivo, ''), timestamp
+      ORDER BY timestamp DESC, id DESC
+      LIMIT 20
+    `)
     .all(pubkey) as AuditRow[];
 
   try {
@@ -361,8 +435,8 @@ export async function verifyCertification(pubkey: string, expectedHash?: string)
   let universidadNombre: string | null = null;
   if (cert.universidad) {
     const uniPerson = getDb()
-      .prepare("SELECT roles, role_data FROM persons WHERE wallet = ?")
-      .get(cert.universidad) as { roles: string | null; role_data: string | null } | undefined;
+      .prepare("SELECT roles, role_data, nombre, apellido FROM persons WHERE wallet = ?")
+      .get(cert.universidad) as { roles: string | null; role_data: string | null; nombre: string | null; apellido: string | null } | undefined;
 
     const roleData = (uniPerson?.role_data ?? "").trim();
     const roles = uniPerson?.roles ?? "[]";
@@ -370,8 +444,20 @@ export async function verifyCertification(pubkey: string, expectedHash?: string)
 
     if (roleData) {
       universidadNombre = roleData;
-    } else if (isUniversidad) {
-      universidadNombre = null;
+    } else {
+      try {
+        const roleDataOnChain = await fetchOnChainPersonRoleData(cert.universidad);
+        if (roleDataOnChain) {
+          universidadNombre = roleDataOnChain;
+        }
+      } catch {
+        // Si falla on-chain, usar fallback local.
+      }
+
+      if (!universidadNombre && isUniversidad) {
+        const personName = `${uniPerson?.nombre ?? ""} ${uniPerson?.apellido ?? ""}`.trim();
+        universidadNombre = personName || cert.universidad;
+      }
     }
   }
 

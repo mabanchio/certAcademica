@@ -6,11 +6,13 @@ import {
   getAllCertifications,
   getCertificationByPubkey,
   getCertificationsByUniversidad,
+  getCertificationsByEgresadoWallet,
   getActiveCertifications,
   getTokenRequestsByUniversidad,
   getTokenRequestsByStatus,
   getAvailableCertTokens,
 } from "../db";
+import { fetchOnChainCertification, fetchOnChainCertificationToken } from "../solana";
 
 const router = Router();
 
@@ -59,7 +61,20 @@ router.get(
     const { wallet } = req.params;
     if (!isValidPublicKey(wallet)) return next(createError("Clave pública inválida", 400));
     const tokens = getAvailableCertTokens(wallet);
-    res.json({ data: tokens });
+    console.log(`[DEBUG] getAvailableCertTokens for ${wallet} returned ${tokens.length} tokens`);
+    console.log(`[DEBUG] Token pubkeys:`, tokens.map(t => t.cert_token_pubkey).join(", "));
+    const enriched = await Promise.all(
+      tokens.map(async (token) => {
+        const onChain = await fetchOnChainCertificationToken(token.cert_token_pubkey);
+        return {
+          ...token,
+          token_request: onChain?.tokenRequest ?? null,
+          carrera: onChain?.carrera ?? null,
+          index: onChain?.index ?? null,
+        };
+      })
+    );
+    res.json({ data: enriched });
   })
 );
 
@@ -74,6 +89,18 @@ router.get(
   })
 );
 
+// GET /certifications/egresado/:wallet — certificaciones del egresado (por wallet registrada)
+router.get(
+  "/egresado/:wallet",
+  asyncHandler(async (req, res, next) => {
+    const { wallet } = req.params;
+    if (!isValidPublicKey(wallet)) return next(createError("Clave pública inválida", 400));
+    const { limit, offset } = parsePagination(req);
+    const certs = getCertificationsByEgresadoWallet(wallet, limit, offset);
+    res.json({ data: certs, limit, offset });
+  })
+);
+
 // GET /certifications/:pubkey — detalle de una certificación
 router.get(
   "/:pubkey",
@@ -81,8 +108,27 @@ router.get(
   asyncHandler(async (req, res, next) => {
     const { pubkey } = req.params;
     if (!isValidPublicKey(pubkey)) return next(createError("Clave pública inválida", 400));
-    const cert = getCertificationByPubkey(pubkey);
+    const cert = getCertificationByPubkey(pubkey, true);
     if (!cert) return next(createError("Certificación no encontrada", 404));
+
+    // Fallback on-chain: completa campos faltantes cuando la fila indexada quedó incompleta.
+    try {
+      const onChain = await fetchOnChainCertification(pubkey);
+      if (onChain) {
+        cert.cert_token = cert.cert_token ?? onChain.certToken;
+        cert.nombre = cert.nombre ?? onChain.nombre;
+        cert.apellido = cert.apellido ?? onChain.apellido;
+        cert.carrera = cert.carrera ?? onChain.carrera;
+        cert.anio_egreso = cert.anio_egreso ?? onChain.anioEgreso;
+        cert.universidad = cert.universidad ?? onChain.universidad;
+        cert.estado = cert.estado ?? onChain.estado;
+        cert.hash_datos = cert.hash_datos ?? onChain.hashDatos;
+        cert.motivo_revocacion = cert.motivo_revocacion ?? onChain.motivoRevocacion;
+      }
+    } catch {
+      // Si falla RPC, devolvemos igualmente la versión indexada.
+    }
+
     res.json({ data: cert });
   })
 );

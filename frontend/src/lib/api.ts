@@ -1,6 +1,6 @@
 // Cliente HTTP hacia el Backend BFF (Fase 11)
 
-const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
+export const BASE = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:3001";
 
 async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
   const method = (init?.method ?? "GET").toUpperCase();
@@ -41,6 +41,7 @@ export interface Certification {
   cert_token: string | null;
   nombre: string | null;
   apellido: string | null;
+  dni: string | null;
   carrera: string | null;
   anio_egreso: number | null;
   /** Wallet de la universidad emisora */
@@ -83,6 +84,12 @@ export interface VerifyResult {
   universidadNombre: string | null;
 }
 
+export interface VerifySearchParams {
+  nombre?: string;
+  apellido?: string;
+  dni?: string;
+}
+
 export interface EventRow {
   id: number;
   signature: string;
@@ -113,14 +120,43 @@ export interface GraduateRequest {
   estado: string | null;
   pais: string | null;
   pdf_hash: string | null;
+  pdf_url: string | null;
+  pdf_file_name: string | null;
+  pdf_uploaded_at: number | null;
+  titulo_nombre: string | null;
+  titulo_carrera: string | null;
+  titulo_institucion: string | null;
+  titulo_anio: number | null;
+  titulo_pais: string | null;
+  titulo_observaciones: string | null;
+  ministerio_derivador_wallet: string | null;
+  ministerio_derivador_nombre: string | null;
+  ministerio_derivador_apellido: string | null;
   motivo_rechazo: string | null;
   motivo?: string | null;
   updated_at: number | null;
 }
 
+export interface UploadGraduateRequestDocumentPayload {
+  wallet: string;
+  pdf_base64: string;
+  pdf_hash: string;
+  file_name: string;
+  mime_type: string;
+  titulo_nombre: string;
+  titulo_carrera: string;
+  titulo_institucion: string;
+  titulo_anio: number;
+  titulo_pais: string;
+  titulo_observaciones: string;
+}
+
 export interface CertTokenAvailable {
   cert_token_pubkey: string;
   timestamp: number;
+  token_request: string | null;
+  carrera: string | null;
+  index: number | null;
 }
 
 export interface SystemStatus {
@@ -157,6 +193,9 @@ export const api = {
   getPersonsByRole: (role: string, limit = 50, offset = 0) =>
     apiFetch<{ data: Person[] }>(`/persons/role/${role}?limit=${limit}&offset=${offset}`),
 
+  getPersonByWallet: (wallet: string) =>
+    apiFetch<{ data: Person | null }>(`/persons/${wallet}`),
+
   updatePersonIdentity: (wallet: string, nombre?: string, apellido?: string, dni?: string) =>
     apiFetch<{ data: Person }>(`/persons/${wallet}`, {
       method: "PUT",
@@ -179,6 +218,11 @@ export const api = {
   getCertificationsByUniversidad: (wallet: string, limit = 50, offset = 0) =>
     apiFetch<{ data: Certification[] }>(
       `/certifications/universidad/${wallet}?limit=${limit}&offset=${offset}`
+    ),
+
+  getCertificationsByEgresado: (wallet: string, limit = 50, offset = 0) =>
+    apiFetch<{ data: Certification[] }>(
+      `/certifications/egresado/${wallet}?limit=${limit}&offset=${offset}`
     ),
 
   getTokenRequestsByUniversidad: (wallet: string, limit = 50, offset = 0) =>
@@ -204,6 +248,15 @@ export const api = {
   getGraduateRequestByWallet: (wallet: string) =>
     apiFetch<{ data: GraduateRequest | null }>(`/graduate-requests/wallet/${wallet}`),
 
+  getGraduateRequestByPubkey: (pubkey: string) =>
+    apiFetch<{ data: GraduateRequest | null }>(`/graduate-requests/pubkey/${pubkey}`),
+
+  uploadGraduateRequestDocument: (payload: UploadGraduateRequestDocumentPayload) =>
+    apiFetch<{ data: GraduateRequest | null }>("/graduate-requests/documents", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+
   // Transacciones / auditoría
   getTransactions: (limit = 50, offset = 0, type?: string) => {
     const q = type ? `&type=${type}` : "";
@@ -228,6 +281,14 @@ export const api = {
 
   verifyGet: (pubkey: string) =>
     apiFetch<{ data: VerifyResult }>(`/verify/${pubkey}`),
+
+  verifySearch: (params: VerifySearchParams) => {
+    const q = new URLSearchParams();
+    if (params.nombre?.trim()) q.set("nombre", params.nombre.trim());
+    if (params.apellido?.trim()) q.set("apellido", params.apellido.trim());
+    if (params.dni?.trim()) q.set("dni", params.dni.trim());
+    return apiFetch<{ data: Certification[] }>(`/verify/search?${q.toString()}`);
+  },
 
   // Estado e inicialización del sistema
   adminStatus: () =>

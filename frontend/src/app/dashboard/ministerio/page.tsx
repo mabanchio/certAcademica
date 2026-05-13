@@ -3,21 +3,18 @@
 import { useEffect, useMemo, useState } from "react";
 import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
 import { PublicKey } from "@solana/web3.js";
-import { api, type AuditEntry, type EventRow, type GraduateRequest, type Person, type TokenRequest } from "@/lib/api";
+import { BASE, api, type AuditEntry, type EventRow, type GraduateRequest, type Person, type TokenRequest } from "@/lib/api";
 import {
-  assignTokenTx,
   approveLocalRequestTx,
   approveTokenRequestTx,
   deriveToCancilleriaTx,
+  emitAndAssignForeignTx,
   fetchGraduateRequestDetailOnChain,
   fetchPersonIdentityOnChain,
   fetchPersonRoleDataOnChain,
   fetchTokenRequestDetailOnChain,
-  mintTokenTx,
   rejectGraduateRequestTx,
   rejectTokenRequestTx,
-  requestTokensTx,
-  sha256FromText,
 } from "@/lib/solanaProgram";
 
 type Tab = "graduacion" | "tokens" | "actividad";
@@ -32,27 +29,13 @@ type RejectTarget =
   | { kind: "graduate"; request: GraduateRequest }
   | { kind: "token"; request: TokenRequest };
 
-const PROGRAM_ID = new PublicKey(
-  process.env.NEXT_PUBLIC_PROGRAM_ID ?? "3A6PEQXB3UUrgNMEDnYYApx5B3jxwSfr7bTpjt5AEEpt"
-);
-
-function deriveTokenRequestPda(solicitante: PublicKey, id: bigint): PublicKey {
-  const idBytes = Buffer.alloc(8);
-  idBytes.writeBigUInt64LE(id);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("token_request"), solicitante.toBuffer(), idBytes],
-    PROGRAM_ID
-  )[0];
-}
-
-function deriveCertTokenPda(tokenRequest: PublicKey, index: number): PublicKey {
-  const indexBytes = Buffer.alloc(4);
-  indexBytes.writeUInt32LE(index);
-  return PublicKey.findProgramAddressSync(
-    [Buffer.from("cert_token"), tokenRequest.toBuffer(), indexBytes],
-    PROGRAM_ID
-  )[0];
-}
+type ReadyGraduateEnrichment = {
+  nombre: string | null;
+  apellido: string | null;
+  dni: string | null;
+  tipo: string | null;
+  pais: string | null;
+};
 
 function shortKey(key: string) {
   if (!key) return "";
@@ -86,9 +69,11 @@ export default function MinisterioDashboard() {
   const [pendingGraduateOnChain, setPendingGraduateOnChain] = useState<
     Record<string, { tipo: string | null; estado: string | null; pais: string | null; motivo: string | null }>
   >({});
+  const [readyGraduateEnrichment, setReadyGraduateEnrichment] = useState<Record<string, ReadyGraduateEnrichment>>({});
   const [graduateSearch, setGraduateSearch] = useState("");
   const [graduateCountryFilter, setGraduateCountryFilter] = useState("");
   const [graduateTypeFilter, setGraduateTypeFilter] = useState("");
+  const [readyGraduateSearch, setReadyGraduateSearch] = useState("");
   const [pendingTokens, setPendingTokens] = useState<TokenRequest[]>([]);
   const [pendingTokenPersons, setPendingTokenPersons] = useState<Record<string, Person>>({});
   const [pendingTokenRoleDataOnChain, setPendingTokenRoleDataOnChain] = useState<Record<string, string>>({});
@@ -122,6 +107,7 @@ export default function MinisterioDashboard() {
   } | null>(null);
   const [selectedActivityLoading, setSelectedActivityLoading] = useState(false);
   const [selectedActivityError, setSelectedActivityError] = useState<string | null>(null);
+  const [selectedActivityRequest, setSelectedActivityRequest] = useState<GraduateRequest | null>(null);
   const [selectedGraduateRequest, setSelectedGraduateRequest] = useState<GraduateRequest | null>(null);
   const [selectedGraduateRequester, setSelectedGraduateRequester] = useState<Person | null>(null);
   const [selectedGraduateEvents, setSelectedGraduateEvents] = useState<EventRow[]>([]);
@@ -137,11 +123,15 @@ export default function MinisterioDashboard() {
   const [rejectTarget, setRejectTarget] = useState<RejectTarget | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [emitRequest, setEmitRequest] = useState<GraduateRequest | null>(null);
+  const [emitRequester, setEmitRequester] = useState<Person | null>(null);
+  const [emitRequestCountry, setEmitRequestCountry] = useState("");
   const [emitTokenId, setEmitTokenId] = useState(() => String(Date.now()));
   const [emitCarrera, setEmitCarrera] = useState("");
   const [emitPlan, setEmitPlan] = useState("");
   const [emitResolucion, setEmitResolucion] = useState("");
   const [emitAnio, setEmitAnio] = useState("");
+  const [readyGraduateHasCertification, setReadyGraduateHasCertification] = useState<Record<string, boolean>>({});
+  const [locallyIssuedWallets, setLocallyIssuedWallets] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [msg, setMsg] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState<string | null>(null);
@@ -165,6 +155,27 @@ export default function MinisterioDashboard() {
     setReadyGraduate([...readyMap.values()]);
     setPendingTokens(t.data);
     setPeopleByWallet(Object.fromEntries(p.data.map((person) => [person.wallet, person])));
+
+    const readyWallets = [...new Set([...gLocal.data, ...gForeign.data].map((r) => r.wallet))];
+    if (readyWallets.length === 0) {
+      setReadyGraduateHasCertification({});
+      return;
+    }
+
+    const certResults = await Promise.allSettled(
+      readyWallets.map(async (w) => {
+        const certs = await api.getCertificationsByEgresado(w, 1, 0);
+        return { wallet: w, hasCertification: certs.data.length > 0 };
+      })
+    );
+
+    const nextHasCert: Record<string, boolean> = {};
+    for (const result of certResults) {
+      if (result.status === "fulfilled") {
+        nextHasCert[result.value.wallet] = result.value.hasCertification;
+      }
+    }
+    setReadyGraduateHasCertification(nextHasCert);
   };
 
   const openTokenRequestDetail = async (request: TokenRequest) => {
@@ -205,6 +216,9 @@ export default function MinisterioDashboard() {
       setReadyGraduate([]);
       setPeopleByWallet({});
       setPendingGraduateOnChain({});
+      setReadyGraduateEnrichment({});
+      setReadyGraduateHasCertification({});
+      setLocallyIssuedWallets({});
       setPendingTokens([]);
       setPendingTokenPersons({});
       setPendingTokenRoleDataOnChain({});
@@ -256,6 +270,64 @@ export default function MinisterioDashboard() {
       cancelled = true;
     };
   }, [pendingGraduate, pendingGraduateOnChain, connection]);
+
+  useEffect(() => {
+    const walletsToFetch = readyGraduate
+      .filter((r) => {
+        const person = peopleByWallet[r.wallet];
+        const enrichment = readyGraduateEnrichment[r.wallet];
+        return !person?.dni || !person?.nombre || !person?.apellido || !enrichment?.tipo || !enrichment?.pais;
+      })
+      .map((r) => r.wallet)
+      .filter((wallet) => !(wallet in readyGraduateEnrichment));
+
+    if (walletsToFetch.length === 0) return;
+
+    let cancelled = false;
+    const loadReadyGraduateEnrichment = async () => {
+      const results = await Promise.all(
+        walletsToFetch.map(async (wallet) => {
+          const [personResult, detailResult] = await Promise.allSettled([
+            api.getPersonByWallet(wallet),
+            fetchGraduateRequestDetailOnChain({
+              connection,
+              egresadoWallet: new PublicKey(wallet),
+            }),
+          ]);
+
+          const person = personResult.status === "fulfilled" ? personResult.value.data : null;
+          const detail = detailResult.status === "fulfilled" ? detailResult.value : null;
+
+          return {
+            wallet,
+            enrichment: {
+              nombre: person?.nombre ?? null,
+              apellido: person?.apellido ?? null,
+              dni: person?.dni ?? null,
+              tipo: detail?.tipo ?? null,
+              pais: detail?.pais ?? null,
+            } satisfies ReadyGraduateEnrichment,
+          };
+        })
+      );
+
+      if (cancelled) return;
+
+      const next: Record<string, ReadyGraduateEnrichment> = {};
+      for (const item of results) {
+        next[item.wallet] = item.enrichment;
+      }
+
+      if (Object.keys(next).length > 0) {
+        setReadyGraduateEnrichment((prev) => ({ ...prev, ...next }));
+      }
+    };
+
+    loadReadyGraduateEnrichment();
+    return () => {
+      cancelled = true;
+    };
+  }, [readyGraduate, peopleByWallet, readyGraduateEnrichment, connection]);
 
   useEffect(() => {
     const wallets = [
@@ -324,17 +396,26 @@ export default function MinisterioDashboard() {
 
       const rows = await Promise.all(
         audit.map(async (entry) => {
-          const txResult = await Promise.allSettled([api.getTransactionBySignature(entry.signature)]);
-          const events = txResult[0].status === "fulfilled" ? txResult[0].value.data : [];
-          const requesterWallet = extractRequesterFromEvents(events);
+          const [txResult, requestResult] = await Promise.allSettled([
+            api.getTransactionBySignature(entry.signature),
+            api.getGraduateRequestByPubkey(entry.entidad),
+          ]);
+
+          const events = txResult.status === "fulfilled" ? txResult.value.data : [];
+          const request = requestResult.status === "fulfilled" ? requestResult.value.data : null;
+          const requesterWallet = request?.wallet ?? extractRequesterFromEvents(events);
           const requesterPerson = requesterWallet ? peopleByWallet.get(requesterWallet) ?? null : null;
           const resolverPerson = peopleByWallet.get(entry.actor) ?? null;
+          const isGraduateFlowAction = ["ApproveLocal", "RejectRequest", "DeriveCancilleria"].includes(entry.accion);
+          const universityLabel = isGraduateFlowAction
+            ? firstNonEmpty(request?.titulo_institucion, requesterPerson?.role_data, request?.titulo_pais) ?? "-"
+            : firstNonEmpty(requesterPerson?.role_data, request?.titulo_institucion, request?.titulo_pais) ?? "-";
 
           return {
             id: entry.id,
             info: {
               requesterName: displayName(requesterPerson),
-              requesterUniversity: firstNonEmpty(requesterPerson?.role_data) ?? "-",
+              requesterUniversity: universityLabel,
               resolverName: displayName(resolverPerson),
             },
           };
@@ -357,10 +438,10 @@ export default function MinisterioDashboard() {
     };
   }, [audit, connection]);
 
-  const run = async (key: string, action: () => Promise<string>) => {
+  const run = async (key: string, action: () => Promise<string>): Promise<boolean> => {
     if (!anchorWallet || !publicKey) {
       setMsg("Conecta una wallet Ministerio para operar.");
-      return;
+      return false;
     }
     setBusyKey(key);
     setMsg(null);
@@ -368,9 +449,11 @@ export default function MinisterioDashboard() {
       const sig = await action();
       setMsg(`Transacción enviada: ${sig}`);
       await loadData(publicKey.toBase58());
+      return true;
     } catch (e) {
       const err = e instanceof Error ? e.message : "Error en transacción";
       setMsg(err);
+      return false;
     } finally {
       setBusyKey(null);
     }
@@ -381,13 +464,15 @@ export default function MinisterioDashboard() {
     setSelectedActivityEvents([]);
     setSelectedActivityActor(null);
     setSelectedActivityRequester(null);
+    setSelectedActivityRequest(null);
     setSelectedActivityTokenDetail(null);
     setSelectedActivityError(null);
     setSelectedActivityLoading(true);
 
-    const [txResult, actorResult, tokenDetailResult] = await Promise.allSettled([
+    const [txResult, actorResult, requestResult, tokenDetailResult] = await Promise.allSettled([
       api.getTransactionBySignature(entry.signature),
       api.getPerson(entry.actor),
+      api.getGraduateRequestByPubkey(entry.entidad),
       (entry.accion === "ApproveTokenRequest" || entry.accion === "RejectTokenRequest")
         ? fetchTokenRequestDetailOnChain({
             connection,
@@ -406,11 +491,16 @@ export default function MinisterioDashboard() {
       setSelectedActivityActor(actorResult.value.data);
     }
 
-    if (tokenDetailResult.status === "fulfilled") {
+    if (tokenDetailResult.status === "fulfilled" && tokenDetailResult.value) {
       setSelectedActivityTokenDetail(tokenDetailResult.value);
     }
+    if (requestResult.status === "fulfilled" && requestResult.value.data) {
+      setSelectedActivityRequest(requestResult.value.data);
+    }
 
-    const requesterWallet = extractRequesterFromEvents(events);
+    const requesterWallet = requestResult.status === "fulfilled" && requestResult.value.data
+      ? requestResult.value.data.wallet
+      : extractRequesterFromEvents(events);
     if (requesterWallet) {
       try {
         const requester = await api.getPerson(requesterWallet);
@@ -506,17 +596,89 @@ export default function MinisterioDashboard() {
 
   const openEmitModal = (request: GraduateRequest) => {
     setEmitRequest(request);
+    setEmitRequester(peopleByWallet[request.wallet] ?? null);
+    setEmitRequestCountry(
+      firstNonEmpty(
+        request.pais,
+        request.titulo_pais,
+        readyGraduateEnrichment[request.wallet]?.pais,
+        pendingGraduateOnChain[request.wallet]?.pais
+      ) ?? ""
+    );
     setEmitTokenId(String(Date.now()));
-    setEmitCarrera("");
-    setEmitPlan("");
-    setEmitResolucion("");
-    setEmitAnio("");
+    setEmitCarrera(request.titulo_carrera ?? "");
+    setEmitPlan("PLAN-EXTRANJERO");
+    setEmitResolucion(request.pubkey ?? "RES-SIN-REF");
+    setEmitAnio(request.titulo_anio ? String(request.titulo_anio) : "");
   };
+
+  useEffect(() => {
+    if (!emitRequest) {
+      setEmitRequester(null);
+      setEmitRequestCountry("");
+      return;
+    }
+
+    setEmitRequestCountry(
+      firstNonEmpty(
+        emitRequest.pais,
+        emitRequest.titulo_pais,
+        readyGraduateEnrichment[emitRequest.wallet]?.pais,
+        pendingGraduateOnChain[emitRequest.wallet]?.pais
+      ) ?? ""
+    );
+
+    let cancelled = false;
+    const loadEmitRequester = async () => {
+      let requester: Person | null = peopleByWallet[emitRequest.wallet] ?? null;
+
+      if (!requester) {
+        try {
+          const personResult = await api.getPersonByWallet(emitRequest.wallet);
+          requester = personResult.data as Person | null;
+        } catch {
+          // no-op
+        }
+      }
+
+      try {
+        const onChain = await fetchPersonIdentityOnChain({
+          connection,
+          wallet: new PublicKey(emitRequest.wallet),
+        });
+
+        if (onChain) {
+          requester = {
+            wallet: emitRequest.wallet,
+            nombre: requester?.nombre ?? onChain.nombre ?? null,
+            apellido: requester?.apellido ?? onChain.apellido ?? null,
+            dni: requester?.dni ?? onChain.dni ?? null,
+            status: requester?.status ?? null,
+            roles: requester?.roles ?? [],
+            role_data: requester?.role_data ?? null,
+            updated_at: requester?.updated_at ?? null,
+          };
+        }
+      } catch {
+        // no-op
+      }
+
+      if (!cancelled) {
+        setEmitRequester(requester);
+      }
+    };
+
+    loadEmitRequester();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [emitRequest, peopleByWallet, readyGraduateEnrichment, pendingGraduateOnChain, connection]);
 
   const submitEmission = async () => {
     if (!emitRequest || !ministerioPk || !anchorWallet) return;
 
-    const requester = peopleByWallet[emitRequest.wallet] ?? null;
+    const requester = emitRequester;
     if (!requester?.nombre || !requester?.apellido || !requester?.dni) {
       setMsg("No se puede emitir: faltan nombre/apellido/dni del titular.");
       return;
@@ -537,67 +699,31 @@ export default function MinisterioDashboard() {
       return;
     }
 
-    const tokenRequest = deriveTokenRequestPda(ministerioPk, tokenId);
-    const certToken = deriveCertTokenPda(tokenRequest, 0);
     const key = `emit:${emitRequest.wallet}`;
 
-    await run(key, async () => {
-      await requestTokensTx({
+    const ok = await run(key, () =>
+      emitAndAssignForeignTx({
         connection,
         wallet: anchorWallet,
-        solicitante: ministerioPk,
+        ministerio: ministerioPk,
         id: tokenId,
         carrera: emitCarrera.trim(),
         plan: emitPlan.trim(),
         resolucion: emitResolucion.trim(),
         anioEgreso,
-        cantidad: 1,
-      });
-
-      await approveTokenRequestTx({
-        connection,
-        wallet: anchorWallet,
-        ministerio: ministerioPk,
-        tokenRequest,
-      });
-
-      await mintTokenTx({
-        connection,
-        wallet: anchorWallet,
-        universidad: ministerioPk,
-        tokenRequest,
-        index: 0,
-      });
-
-      const hashDatos = await sha256FromText(
-        JSON.stringify({
-          nombre: requesterNombre,
-          apellido: requesterApellido,
-          dni: requesterDni,
-          wallet: emitRequest.wallet,
-          tipo: emitRequest.tipo,
-          pais: emitRequest.pais,
-          carrera: emitCarrera.trim(),
-          plan: emitPlan.trim(),
-          resolucion: emitResolucion.trim(),
-          anioEgreso,
-        })
-      );
-
-      return assignTokenTx({
-        connection,
-        wallet: anchorWallet,
-        universidad: ministerioPk,
-        tokenRequest,
-        certToken,
         nombre: requesterNombre,
         apellido: requesterApellido,
         dni: requesterDni,
-        hashDatos,
-      });
-    });
+        walletTitular: emitRequest.wallet,
+        tipo: emitRequest.tipo,
+        pais: emitRequest.pais,
+      })
+    );
 
-    setEmitRequest(null);
+    if (ok) {
+      setLocallyIssuedWallets((prev) => ({ ...prev, [emitRequest.wallet]: true }));
+      setEmitRequest(null);
+    }
   };
 
   const confirmReject = async () => {
@@ -714,6 +840,40 @@ export default function MinisterioDashboard() {
     });
   }, [pendingGraduate, peopleByWallet, pendingGraduateOnChain, graduateSearch, graduateCountryFilter, graduateTypeFilter]);
 
+  const filteredReadyGraduate = useMemo(() => {
+    const q = readyGraduateSearch.trim().toLowerCase();
+    return readyGraduate.filter((r) => {
+      if (readyGraduateHasCertification[r.wallet] || locallyIssuedWallets[r.wallet]) {
+        return false;
+      }
+      const person = peopleByWallet[r.wallet];
+      const enrichment = readyGraduateEnrichment[r.wallet];
+      const mergedNombre = firstNonEmpty(person?.nombre, enrichment?.nombre) ?? "";
+      const mergedApellido = firstNonEmpty(person?.apellido, enrichment?.apellido) ?? "";
+      const mergedDni = firstNonEmpty(person?.dni, enrichment?.dni) ?? "";
+      const tipo = firstNonEmpty(r.tipo, pendingGraduateOnChain[r.wallet]?.tipo, enrichment?.tipo);
+      const pais = firstNonEmpty(r.pais, pendingGraduateOnChain[r.wallet]?.pais, enrichment?.pais);
+      const fullName = `${mergedNombre} ${mergedApellido}`.trim();
+
+      return (
+        q.length === 0 ||
+        fullName.toLowerCase().includes(q) ||
+        mergedDni.toLowerCase().includes(q) ||
+        r.wallet.toLowerCase().includes(q) ||
+        (tipo ?? "").toLowerCase().includes(q) ||
+        (pais ?? "").toLowerCase().includes(q)
+      );
+    });
+  }, [
+    readyGraduate,
+    peopleByWallet,
+    readyGraduateEnrichment,
+    pendingGraduateOnChain,
+    readyGraduateSearch,
+    readyGraduateHasCertification,
+    locallyIssuedWallets,
+  ]);
+
   const activityActions = useMemo(() => {
     return [...new Set(audit.map((entry) => entry.accion))].sort((a, b) => a.localeCompare(b, "es"));
   }, [audit]);
@@ -738,15 +898,19 @@ export default function MinisterioDashboard() {
       <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
         <StatCard label="Pendientes graduación" value={pendingGraduate.length} color="yellow" />
         <StatCard label="Pendientes tokens" value={pendingTokens.length} color="green" />
-        <StatCard label="Mi actividad" value={audit.length} />
+        <StatCard label="Listas para emitir" value={filteredReadyGraduate.length} />
       </div>
 
-      <div className="border-b border-gray-200 flex gap-1 overflow-x-auto">
-        {[
-          { key: "graduacion", label: "Solicitudes de graduación" },
-          { key: "tokens", label: "Solicitudes de tokens" },
+      {(() => {
+        const ministryTabs: Array<{ key: Tab; label: string; count?: number }> = [
+          { key: "graduacion", label: "Solicitudes de graduación", count: pendingGraduate.length },
+          { key: "tokens", label: "Solicitudes de tokens", count: pendingTokens.length },
           { key: "actividad", label: "Mi actividad" },
-        ].map((t) => (
+        ];
+
+        return (
+      <div className="border-b border-gray-200 flex gap-1 overflow-x-auto">
+        {ministryTabs.map((t) => (
           <button
             key={t.key}
             onClick={() => setTab(t.key as Tab)}
@@ -755,9 +919,16 @@ export default function MinisterioDashboard() {
             }`}
           >
             {t.label}
+            {typeof t.count === "number" && t.count > 0 && (
+              <span className="ml-1.5 text-xs bg-gray-100 text-gray-600 rounded-full px-1.5 py-0.5">
+                {t.count}
+              </span>
+            )}
           </button>
         ))}
       </div>
+        );
+      })()}
 
       {tab === "graduacion" && (
         <section>
@@ -869,6 +1040,15 @@ export default function MinisterioDashboard() {
           </div>
 
           <h2 className="text-lg font-semibold text-primary mt-6 mb-3">Aprobadas listas para emitir certificación</h2>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <input
+              type="text"
+              value={readyGraduateSearch}
+              onChange={(e) => setReadyGraduateSearch(e.target.value)}
+              placeholder="Filtrar por solicitante, DNI, wallet, tipo o país"
+              className="min-w-[240px] flex-1 rounded-md border border-gray-300 px-3 py-2 text-sm outline-none focus:border-primary"
+            />
+          </div>
           <div className="overflow-x-auto rounded-lg border border-gray-200">
             <table className="min-w-full text-sm">
               <thead className="bg-gray-50 text-gray-600 uppercase text-xs">
@@ -882,15 +1062,35 @@ export default function MinisterioDashboard() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {readyGraduate.map((r) => {
-                  const person = peopleByWallet[r.wallet] ?? null;
-                  const tipo = firstNonEmpty(r.tipo, pendingGraduateOnChain[r.wallet]?.tipo);
-                  const pais = firstNonEmpty(r.pais, pendingGraduateOnChain[r.wallet]?.pais);
+                {filteredReadyGraduate.map((r) => {
+                  const personBase = peopleByWallet[r.wallet] ?? null;
+                  const enrichment = readyGraduateEnrichment[r.wallet];
+                  const person = personBase
+                    ? {
+                        ...personBase,
+                        nombre: firstNonEmpty(personBase.nombre, enrichment?.nombre) ?? personBase.nombre,
+                        apellido: firstNonEmpty(personBase.apellido, enrichment?.apellido) ?? personBase.apellido,
+                        dni: firstNonEmpty(personBase.dni, enrichment?.dni) ?? personBase.dni,
+                      }
+                    : enrichment
+                      ? {
+                          wallet: r.wallet,
+                          nombre: enrichment.nombre,
+                          apellido: enrichment.apellido,
+                          dni: enrichment.dni,
+                          status: null,
+                          roles: [],
+                          role_data: null,
+                          updated_at: null,
+                        }
+                      : null;
+                  const tipo = firstNonEmpty(r.tipo, pendingGraduateOnChain[r.wallet]?.tipo, enrichment?.tipo);
+                  const pais = firstNonEmpty(r.pais, pendingGraduateOnChain[r.wallet]?.pais, enrichment?.pais);
                   return (
                     <tr key={`ready:${r.wallet}`}>
                       <td className="px-4 py-3 font-mono text-xs" title={r.wallet}>{shortKey(r.wallet)}</td>
                       <td className="px-4 py-3">{displayName(person)}</td>
-                      <td className="px-4 py-3">{person?.dni ?? "-"}</td>
+                      <td className="px-4 py-3">{person?.dni ?? enrichment?.dni ?? "-"}</td>
                       <td className="px-4 py-3">{tipo ?? "-"}</td>
                       <td className="px-4 py-3">{pais ?? "-"}</td>
                       <td className="px-4 py-3">
@@ -911,10 +1111,10 @@ export default function MinisterioDashboard() {
                     </tr>
                   );
                 })}
-                {readyGraduate.length === 0 && (
+                {filteredReadyGraduate.length === 0 && (
                   <tr>
                     <td colSpan={6} className="px-4 py-6 text-center text-sm text-gray-500">
-                      No hay solicitudes aprobadas listas para emisión.
+                      No hay solicitudes aprobadas listas para emisión que coincidan con el filtro.
                     </td>
                   </tr>
                 )}
@@ -1098,6 +1298,7 @@ export default function MinisterioDashboard() {
           events={selectedActivityEvents}
           actor={selectedActivityActor}
           requester={selectedActivityRequester}
+          request={selectedActivityRequest}
           tokenDetail={selectedActivityTokenDetail}
           loading={selectedActivityLoading}
           error={selectedActivityError}
@@ -1106,6 +1307,7 @@ export default function MinisterioDashboard() {
             setSelectedActivityEvents([]);
             setSelectedActivityActor(null);
             setSelectedActivityRequester(null);
+            setSelectedActivityRequest(null);
             setSelectedActivityTokenDetail(null);
             setSelectedActivityLoading(false);
             setSelectedActivityError(null);
@@ -1129,7 +1331,8 @@ export default function MinisterioDashboard() {
       {emitRequest && (
         <IssueCertificationModal
           request={emitRequest}
-          requester={peopleByWallet[emitRequest.wallet] ?? null}
+          requester={emitRequester}
+          requestCountry={emitRequestCountry}
           tokenId={emitTokenId}
           carrera={emitCarrera}
           plan={emitPlan}
@@ -1140,7 +1343,11 @@ export default function MinisterioDashboard() {
           onPlanChange={setEmitPlan}
           onResolucionChange={setEmitResolucion}
           onAnioChange={setEmitAnio}
-          onCancel={() => setEmitRequest(null)}
+          onCancel={() => {
+            setEmitRequest(null);
+            setEmitRequester(null);
+            setEmitRequestCountry("");
+          }}
           onConfirm={submitEmission}
           busy={busyKey === `emit:${emitRequest.wallet}`}
         />
@@ -1254,6 +1461,7 @@ function ActivityDetailModal({
   events,
   actor,
   requester,
+  request,
   tokenDetail,
   loading,
   error,
@@ -1263,6 +1471,7 @@ function ActivityDetailModal({
   events: EventRow[];
   actor: Person | null;
   requester: Person | null;
+  request: GraduateRequest | null;
   tokenDetail: {
     carrera: string | null;
     plan: string | null;
@@ -1307,6 +1516,9 @@ function ActivityDetailModal({
                 <p className="break-all"><strong>Wallet actor:</strong> {entry.actor}</p>
                 <p><strong>Titular solicitud:</strong> {requester?.nombre ?? "-"} {requester?.apellido ?? ""}</p>
                 <p className="break-all"><strong>Wallet titular:</strong> {requester?.wallet ?? "-"}</p>
+                <p><strong>Universidad / institución:</strong> {request?.titulo_institucion ?? requester?.role_data ?? "-"}</p>
+                <p><strong>Título:</strong> {request?.titulo_nombre ?? "-"}</p>
+                <p><strong>País del título:</strong> {request?.titulo_pais ?? request?.pais ?? "-"}</p>
                 <p className="break-all"><strong>Entidad (PDA):</strong> {entry.entidad}</p>
                 <p className="break-all"><strong>Signature:</strong> {entry.signature}</p>
                 <p><strong>Slot:</strong> {txSlot ?? "-"}</p>
@@ -1483,6 +1695,27 @@ function GraduateRequestDetailModal({
                 <p><strong>Estado:</strong> {estado ?? "-"}</p>
                 <p><strong>Motivo/observación:</strong> {motivo ?? "-"}</p>
                 <p className="break-all"><strong>Hash PDF:</strong> {onChain?.pdfHashHex ?? request.pdf_hash ?? "-"}</p>
+                <p><strong>Título:</strong> {request.titulo_nombre ?? "-"}</p>
+                <p><strong>Carrera título:</strong> {request.titulo_carrera ?? "-"}</p>
+                <p><strong>Institución:</strong> {request.titulo_institucion ?? "-"}</p>
+                <p><strong>Año título:</strong> {request.titulo_anio ?? "-"}</p>
+                <p><strong>País título:</strong> {request.titulo_pais ?? "-"}</p>
+                <p><strong>Observaciones:</strong> {request.titulo_observaciones ?? "-"}</p>
+                <p>
+                  <strong>PDF:</strong>{" "}
+                  {request.pdf_url ? (
+                    <a
+                      href={`${BASE}${request.pdf_url}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-primary underline"
+                    >
+                      {request.pdf_file_name ?? "Ver PDF"}
+                    </a>
+                  ) : (
+                    "No cargado"
+                  )}
+                </p>
                 <p className="break-all"><strong>Pubkey solicitud:</strong> {request.pubkey ?? "-"}</p>
                 <p className="break-all"><strong>Signature:</strong> {signature ?? "-"}</p>
                 <p><strong>Slot:</strong> {slot ?? "-"}</p>
@@ -1580,6 +1813,7 @@ function RejectReasonModal({
 function IssueCertificationModal({
   request,
   requester,
+  requestCountry,
   tokenId,
   carrera,
   plan,
@@ -1596,6 +1830,7 @@ function IssueCertificationModal({
 }: {
   request: GraduateRequest;
   requester: Person | null;
+  requestCountry: string;
   tokenId: string;
   carrera: string;
   plan: string;
@@ -1632,7 +1867,7 @@ function IssueCertificationModal({
             <p><strong>DNI:</strong> {requester?.dni ?? "-"}</p>
             <p className="break-all"><strong>Wallet:</strong> {request.wallet}</p>
             <p><strong>Tipo:</strong> {request.tipo ?? "-"}</p>
-            <p><strong>País:</strong> {request.pais ?? "-"}</p>
+            <p><strong>País:</strong> {requestCountry || request.pais || request.titulo_pais || "-"}</p>
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
