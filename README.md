@@ -98,11 +98,25 @@ PENDIENTE: agregar enlace cuando se grabe.
 - Landing comercial/responsiva con acceso directo a verificacion.
 
 ## Uso de Herramientas de IA
-Se utilizo asistencia de IA para soporte de desarrollo, depuracion, documentacion y refactor puntual de frontend/backend.
+
+El desarrollo de este proyecto contó con asistencia intensiva de herramientas de IA a lo largo de todo el ciclo:
+
+**GitHub Copilot (MCP integrado en VS Code)**
+- Utilizado como agente de desarrollo dentro de VS Code via Model Context Protocol (MCP).
+- El agente ejecutó herramientas MCP para leer/escribir archivos, correr comandos de terminal, buscar referencias en el codebase y aplicar ediciones multi-archivo de forma coordinada.
+- Flujo típico: prompt en lenguaje natural → el agente planifica tareas → usa herramientas MCP (`read_file`, `replace_string_in_file`, `run_in_terminal`, `grep_search`) → valida cambios → hace commit.
+- Ejemplos concretos: depuración del indexador de eventos, diseño de queries SQLite con fallback de DNI, refactor del panel de auditoría, generación de tests de integración.
+
+**ChatGPT**
+- Consultas puntuales sobre patrones de Anchor (PDAs, seeds, CPI), diseño de flujos de certificación y revisión de lógica de negocio.
+
+**Comprensión del código generado**
+- Todo el código generado o sugerido por IA fue revisado, adaptado al dominio y validado mediante tests antes de integrarse al repositorio.
 
 ## Autor
 - Nombre: Matias Alejandro Banchio
 - Email: mabanchio@gmail.com
+- LinkedIn: [linkedin.com/in/mabanchio](https://www.linkedin.com/in/mabanchio)
 
 ## Licencia
 MIT. Ver archivo [LICENSE](LICENSE).

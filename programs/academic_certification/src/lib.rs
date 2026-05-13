@@ -15,6 +15,9 @@ const AUDIT_LOG_SEED: &[u8] = b"audit_log";
 pub mod academic_certification {
     use super::*;
 
+    /// Inicializa el programa creando la cuenta de configuración global (PDA `config`)
+    /// y registrando al deployer como administrador con rol `Admin`.
+    /// Solo puede ejecutarse una vez; falla si `config` ya existe.
     pub fn initialize(
         ctx: Context<Initialize>,
         nombre: String,
@@ -60,6 +63,9 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Registra una nueva persona en el sistema desde la cuenta admin.
+    /// Crea la PDA `person` para la wallet indicada con los datos proporcionados.
+    /// La persona queda activa pero sin roles operativos; estos se asignan por flujo explícito.
     pub fn register_person(
         ctx: Context<RegisterPerson>,
         nombre: String,
@@ -110,6 +116,9 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Solicita la asignación de un rol operativo (Universidad, Ministerio, Cancillería o Egresado).
+    /// Si la PDA `person` no existe, la crea automáticamente con los datos del solicitante.
+    /// Emite `RoleRequestedEvent` y `AuditLogEvent` para trazabilidad completa.
     pub fn request_role(
         ctx: Context<RequestRole>,
         requested_role: Role,
@@ -192,6 +201,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Aprueba una solicitud de rol pendiente. Solo ejecutable por el admin.
+    /// Asigna el rol solicitado a la persona y marca la solicitud como `Aprobada`.
     pub fn approve_role(ctx: Context<ResolveRoleRequest>) -> Result<()> {
         ensure_admin(&ctx.accounts.config, &ctx.accounts.admin, &ctx.accounts.admin_person)?;
         ensure_active(&ctx.accounts.target_person)?;
@@ -233,6 +244,7 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Rechaza una solicitud de rol pendiente con motivo obligatorio. Solo ejecutable por el admin.
     pub fn reject_role(ctx: Context<ResolveRoleRequest>, motivo: String) -> Result<()> {
         validate_rejection_reason(&motivo)?;
 
@@ -271,6 +283,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Cambia el estado (Activo/Inactivo) de cualquier persona excepto el admin.
+    /// Requiere motivo de auditoría. Solo ejecutable por el admin.
     pub fn set_status(ctx: Context<SetStatus>, status: PersonStatus, motivo: String) -> Result<()> {
         validate_change_reason(&motivo)?;
 
@@ -305,6 +319,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Actualiza todos los campos de una persona (nombre, apellido, dni, status, roles, role_data).
+    /// Permite correcciones administrativas con auditoría. Solo ejecutable por el admin.
     pub fn update_person_admin(
         ctx: Context<UpdatePersonAdmin>,
         nombre: String,
@@ -363,6 +379,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Crea una solicitud de tokens de certificación por parte de una Universidad.
+    /// Los tokens representan cupos para emitir certificados de una carrera/plan específico.
     pub fn request_tokens(
         ctx: Context<RequestTokens>,
         _id: u64,
@@ -415,6 +433,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Aprueba una solicitud de tokens. Solo ejecutable por el Ministerio.
+    /// Habilita a la Universidad para acuñar los tokens correspondientes.
     pub fn approve_token_request(ctx: Context<ResolveTokenRequest>) -> Result<()> {
         ensure_ministerio(&ctx.accounts.ministerio_person)?;
 
@@ -445,6 +465,7 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Rechaza una solicitud de tokens con motivo obligatorio. Solo ejecutable por el Ministerio.
     pub fn reject_token_request(ctx: Context<ResolveTokenRequest>, motivo: String) -> Result<()> {
         validate_rejection_reason(&motivo)?;
 
@@ -479,6 +500,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Acuña (mint) un token de certificación individual a partir de una solicitud aprobada.
+    /// Cada token tiene un índice único dentro de la solicitud. Solo ejecutable por la Universidad solicitante.
     pub fn mint_token(ctx: Context<MintToken>, index: u32) -> Result<()> {
         ensure_universidad(&ctx.accounts.universidad_person)?;
 
@@ -529,6 +552,9 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Asigna un token disponible a un egresado, emitiendo la certificación on-chain.
+    /// Registra nombre, apellido, DNI, carrera, universidad y hash de datos en la PDA `Certification`.
+    /// Solo ejecutable por la Universidad propietaria del token.
     pub fn assign_token_to_graduate(
         ctx: Context<AssignToken>,
         nombre: String,
@@ -604,6 +630,9 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Crea una solicitud de certificación por parte del egresado (LOCAL o EXTRANJERO).
+    /// Almacena el hash SHA-256 del documento probatorio y el país de origen si es extranjero.
+    /// Emite `CertificationRequestedEvent` para que el indexador la registre.
     pub fn request_certification(
         ctx: Context<RequestCertification>,
         tipo: GraduateType,
@@ -651,6 +680,8 @@ pub mod academic_certification {
 
     // ── FASE 6: Ministerio ───────────────────────────────────────────────────
 
+    /// Aprueba una solicitud de certificación LOCAL. Solo ejecutable por el Ministerio.
+    /// Cambia el estado a `AprobadoLocal`, habilitando la asignación de token.
     pub fn approve_local_request(ctx: Context<ResolveGraduateRequest>) -> Result<()> {
         ensure_ministerio(&ctx.accounts.ministerio_person)?;
 
@@ -681,6 +712,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Rechaza una solicitud de certificación (local o extranjera) con motivo obligatorio.
+    /// Solo ejecutable por el Ministerio. El estado pasa a `Rechazado`.
     pub fn reject_request(ctx: Context<ResolveGraduateRequest>, motivo: String) -> Result<()> {
         validate_rejection_reason(&motivo)?;
         ensure_ministerio(&ctx.accounts.ministerio_person)?;
@@ -713,6 +746,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Deriva una solicitud EXTRANJERA pendiente hacia la Cancillería para su resolución.
+    /// Solo ejecutable por el Ministerio. El estado pasa a `DerivadoCancilleria`.
     pub fn derive_to_cancilleria(ctx: Context<ResolveGraduateRequest>) -> Result<()> {
         ensure_ministerio(&ctx.accounts.ministerio_person)?;
 
@@ -745,6 +780,8 @@ pub mod academic_certification {
 
     // ── FASE 7: Cancillería ───────────────────────────────────────────────────
 
+    /// Aprueba una solicitud de certificación extranjera derivada. Solo ejecutable por la Cancillería.
+    /// El estado pasa a `AprobadoExtranjero`, habilitando la asignación de token.
     pub fn approve_foreign(ctx: Context<ResolveForeignRequest>) -> Result<()> {
         ensure_cancilleria(&ctx.accounts.cancilleria_person)?;
 
@@ -777,6 +814,8 @@ pub mod academic_certification {
         Ok(())
     }
 
+    /// Rechaza una solicitud de certificación extranjera con motivo obligatorio.
+    /// Solo ejecutable por la Cancillería. El estado pasa a `Rechazado`.
     pub fn reject_foreign(ctx: Context<ResolveForeignRequest>, motivo: String) -> Result<()> {
         validate_rejection_reason(&motivo)?;
         ensure_cancilleria(&ctx.accounts.cancilleria_person)?;
@@ -814,6 +853,8 @@ pub mod academic_certification {
 
     // ── FASE 8: Revocación ───────────────────────────────────────────────────
 
+    /// Revoca una certificación activa con motivo obligatorio. Solo ejecutable por el admin.
+    /// El estado pasa a `Revocada` y queda registrado on-chain para auditoría permanente.
     pub fn revoke_certification(ctx: Context<RevokeCertification>, motivo: String) -> Result<()> {
         validate_change_reason(&motivo)?;
 
@@ -849,6 +890,9 @@ pub mod academic_certification {
 
     // ── FASE 9: Auditória ───────────────────────────────────────────────────
 
+    /// Crea un registro de auditoría on-chain (PDA `audit_log`) para cualquier acción relevante.
+    /// Usa un contador secuencial (`audit_seq`) para evitar colisiones y garantizar orden.
+    /// Permite trazabilidad completa de todas las operaciones del sistema.
     pub fn create_audit_log(
         ctx: Context<CreateAuditLog>,
         audit_seq: u64,
