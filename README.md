@@ -101,9 +101,8 @@ PENDIENTE: agregar enlace cuando se grabe.
 Se utilizo asistencia de IA para soporte de desarrollo, depuracion, documentacion y refactor puntual de frontend/backend.
 
 ## Autor
-- Nombre: Matias (completar apellido)
-- Email: PENDIENTE
-- LinkedIn: PENDIENTE
+- Nombre: Matias Alejandro Banchio
+- Email: mabanchio@gmail.com
 
 ## Licencia
 MIT. Ver archivo [LICENSE](LICENSE).
