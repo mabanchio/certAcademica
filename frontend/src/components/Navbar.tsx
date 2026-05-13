@@ -36,16 +36,15 @@ export function Navbar() {
   const isAdmin = roles.includes("Admin");
   const switchableRoles = roles.filter((r): r is Exclude<AppRole, null> => r in ROLE_ROUTES);
 
-  const nav = connected
-    ? [
-        { href: "/dashboard", label: "Inicio" },
-        { href: "/verify", label: "Verificación pública" },
-        ...(isAdmin ? [{ href: "/audit", label: "Auditoría" }] : []),
-      ]
-    : [];
+  const nav = [
+    { href: "/", label: "Inicio" },
+    { href: "/verify", label: "Verificación pública" },
+    ...(connected ? [{ href: "/dashboard", label: "Panel" }] : []),
+    ...(connected && isAdmin ? [{ href: "/audit", label: "Auditoría" }] : []),
+  ];
 
   return (
-    <nav className="bg-primary text-white shadow-md">
+    <nav className="sticky top-0 z-50 bg-primary/95 text-white shadow-md backdrop-blur supports-[backdrop-filter]:bg-primary/85">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
         <Link href="/" className="flex items-center gap-3">
           <Logo className="h-8 w-8" />
@@ -82,9 +81,13 @@ export function Navbar() {
               key={item.href}
               href={item.href}
               className={`text-sm font-medium transition-colors hover:text-accent ${
-                pathname.startsWith(item.href)
-                  ? "text-accent"
-                  : "text-gray-300"
+                item.href === "/"
+                  ? pathname === "/"
+                    ? "text-accent"
+                    : "text-gray-300"
+                  : pathname.startsWith(item.href)
+                    ? "text-accent"
+                    : "text-gray-300"
               }`}
             >
               {item.label}

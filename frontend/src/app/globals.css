@@ -13,6 +13,85 @@ body {
   @apply bg-gray-50 text-gray-900 font-sans;
 }
 
+.landing-bg {
+  background:
+    radial-gradient(1200px 500px at 10% -10%, rgba(45, 156, 219, 0.2), transparent 60%),
+    radial-gradient(900px 400px at 90% -10%, rgba(10, 37, 64, 0.12), transparent 60%),
+    linear-gradient(180deg, #ffffff 0%, #f0f9ff 48%, #f8fafc 100%);
+}
+
+.bg-orb {
+  position: absolute;
+  border-radius: 9999px;
+  filter: blur(36px);
+  opacity: 0.35;
+  animation: drift 16s ease-in-out infinite;
+}
+
+.bg-orb--a {
+  width: 22rem;
+  height: 22rem;
+  background: rgba(45, 156, 219, 0.45);
+  top: -6rem;
+  left: -4rem;
+}
+
+.bg-orb--b {
+  width: 18rem;
+  height: 18rem;
+  background: rgba(10, 37, 64, 0.28);
+  top: 22rem;
+  right: -3rem;
+  animation-delay: 3s;
+}
+
+.bg-orb--c {
+  width: 15rem;
+  height: 15rem;
+  background: rgba(45, 156, 219, 0.35);
+  bottom: 5rem;
+  left: 28%;
+  animation-delay: 6s;
+}
+
+.glass-panel {
+  background: rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(10px);
+}
+
+.hover-lift {
+  transition: transform 280ms ease, box-shadow 280ms ease, border-color 280ms ease;
+}
+
+.hover-lift:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 16px 35px rgba(10, 37, 64, 0.12);
+  border-color: rgba(45, 156, 219, 0.45);
+}
+
+@keyframes drift {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(0, 18px, 0) scale(1.06);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-orb {
+    animation: none;
+  }
+  .hover-lift {
+    transition: none;
+  }
+  .hover-lift:hover {
+    transform: none;
+    box-shadow: none;
+  }
+}
+
 /* Overrides para Solana Wallet Adapter */
 .wallet-adapter-button {
   @apply !bg-accent !text-white !rounded-lg !font-semibold !px-5 !py-2 hover:!opacity-90 transition-opacity;
