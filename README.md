@@ -116,7 +116,7 @@ El desarrollo de este proyecto contó con asistencia intensiva de herramientas d
 ## Autor
 - Nombre: Matias Alejandro Banchio
 - Email: mabanchio@gmail.com
-- LinkedIn: [linkedin.com/in/mabanchio](https://www.linkedin.com/in/mabanchio)
+- LinkedIn: [linkedin.com/in/ab-tech](https://www.linkedin.com/in/ab-tech/)
 
 ## Licencia
 MIT. Ver archivo [LICENSE](LICENSE).
