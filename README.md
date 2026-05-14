@@ -91,12 +91,19 @@ Ver [docs/diagramas.md](docs/diagramas.md).
 PENDIENTE: agregar enlace cuando se grabe.
 
 ```markdown
-## Video Demostracion
 ## 🎬 Video Demo
 
-[![CertAcademica Demo](https://img.youtube.com/vi/xzbMdvabSyE/hqdefault.jpg)](https://youtu.be/xzbMdvabSyE)
+<p align="center">
+  <a href="https://youtu.be/xzbMdvabSyE">
+    <img src="https://img.youtube.com/vi/xzbMdvabSyE/hqdefault.jpg" 
+         alt="CertAcademica Demo"
+         width="700">
+  </a>
+</p>
 
-➡️ Click en la imagen para ver la demostración completa del proyecto CertAcademica.
+<p align="center">
+  Presentación oficial del Trabajo Final de Máster — CertAcademica
+</p>
 ```
 
 ## Innovaciones Implementadas
