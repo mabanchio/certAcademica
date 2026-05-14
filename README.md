@@ -68,8 +68,11 @@ cd indexer && npm run dev
 - Red objetivo de entrega: Devnet
 - Program ID localnet/devnet (configurado):
   - `3A6PEQXB3UUrgNMEDnYYApx5B3jxwSfr7bTpjt5AEEpt`
-- Estado despliegue Devnet: en transición (pendiente confirmar transacción de deploy en explorer)
-- Explorador: Solana Explorer / Solscan (cluster devnet)
+- Estado despliegue Devnet: exitoso
+- Transacción de deploy (signature):
+  - `5Gms5drp9y7duFh1iK7Sz6vmRijXeWe75TBYSQdPyw4RAxrjuBcXtaxx5juu14rD2AiEqHcvFBpvMtnHYkfWhj5i`
+- Explorer (Devnet): https://explorer.solana.com/tx/5Gms5drp9y7duFh1iK7Sz6vmRijXeWe75TBYSQdPyw4RAxrjuBcXtaxx5juu14rD2AiEqHcvFBpvMtnHYkfWhj5i?cluster=devnet
+- Solscan (Devnet): https://solscan.io/tx/5Gms5drp9y7duFh1iK7Sz6vmRijXeWe75TBYSQdPyw4RAxrjuBcXtaxx5juu14rD2AiEqHcvFBpvMtnHYkfWhj5i?cluster=devnet
 
 ## Casos de Uso
 1. Solicitud de certificacion local o extranjera por Egresado.
@@ -79,7 +82,7 @@ cd indexer && npm run dev
 5. Consulta de actividad y auditoria por transaccion.
 
 ## Capturas de Pantalla
-Ver carpeta [screenshots](screenshots). Se incluyen placeholders de entrega y nombres recomendados.
+Ver carpeta [screenshots](screenshots). Incluye la evidencia de deploy en Devnet en `06-sol-explorer-transaccion-devnet.png`.
 
 ## Diagramas Tecnicos
 Ver [docs/diagramas.md](docs/diagramas.md).

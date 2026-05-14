@@ -34,5 +34,10 @@ Area: Consulta y validacion publica de certificaciones sin wallet.
 
 ![Panel verificacion publica](05-panel-verificacion-publica.png)
 
+### 06 - Explorer Devnet: transaccion de deploy
+Area: Evidencia on-chain del despliegue del programa en Solana Devnet.
+
+![Explorer Devnet transaccion deploy](06-sol-explorer-transaccion-devnet.png)
+
 ## Nota
 - La numeracion mantiene el orden del flujo principal del sistema para facilitar comprensión.
