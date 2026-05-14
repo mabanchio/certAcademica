@@ -97,6 +97,7 @@ export default function MinisterioDashboard() {
   const [selectedActivityEvents, setSelectedActivityEvents] = useState<EventRow[]>([]);
   const [selectedActivityActor, setSelectedActivityActor] = useState<Person | null>(null);
   const [selectedActivityRequester, setSelectedActivityRequester] = useState<Person | null>(null);
+  const [selectedActivityUniversity, setSelectedActivityUniversity] = useState<string | null>(null);
   const [activityInfoById, setActivityInfoById] = useState<Record<number, ActivityRowInfo>>({});
   const [selectedActivityTokenDetail, setSelectedActivityTokenDetail] = useState<{
     carrera: string | null;
@@ -407,9 +408,39 @@ export default function MinisterioDashboard() {
           const requesterPerson = requesterWallet ? peopleByWallet.get(requesterWallet) ?? null : null;
           const resolverPerson = peopleByWallet.get(entry.actor) ?? null;
           const isGraduateFlowAction = ["ApproveLocal", "RejectRequest", "DeriveCancilleria"].includes(entry.accion);
-          const universityLabel = isGraduateFlowAction
-            ? firstNonEmpty(request?.titulo_institucion, requesterPerson?.role_data, request?.titulo_pais) ?? "-"
-            : firstNonEmpty(requesterPerson?.role_data, request?.titulo_institucion, request?.titulo_pais) ?? "-";
+          const isTokenFlowAction = ["ApproveTokenRequest", "RejectTokenRequest"].includes(entry.accion);
+
+          let universityLabel = "-";
+          if (isGraduateFlowAction) {
+            universityLabel = firstNonEmpty(request?.titulo_institucion, requesterPerson?.role_data, request?.titulo_pais) ?? "-";
+          } else if (isTokenFlowAction) {
+            const universityWallet = extractUniversityFromEvents(events);
+            let universityPerson = universityWallet ? peopleByWallet.get(universityWallet) ?? null : null;
+
+            if (!universityPerson && universityWallet) {
+              try {
+                universityPerson = (await api.getPerson(universityWallet)).data;
+              } catch {
+                universityPerson = null;
+              }
+            }
+
+            let universityRoleData = firstNonEmpty(universityPerson?.role_data, requesterPerson?.role_data);
+            if (!universityRoleData && universityWallet) {
+              try {
+                universityRoleData = await fetchPersonRoleDataOnChain({
+                  connection,
+                  wallet: new PublicKey(universityWallet),
+                });
+              } catch {
+                universityRoleData = null;
+              }
+            }
+
+            universityLabel = firstNonEmpty(universityRoleData, universityWallet) ?? "-";
+          } else {
+            universityLabel = firstNonEmpty(requesterPerson?.role_data, request?.titulo_institucion, request?.titulo_pais) ?? "-";
+          }
 
           return {
             id: entry.id,
@@ -464,6 +495,7 @@ export default function MinisterioDashboard() {
     setSelectedActivityEvents([]);
     setSelectedActivityActor(null);
     setSelectedActivityRequester(null);
+    setSelectedActivityUniversity(null);
     setSelectedActivityRequest(null);
     setSelectedActivityTokenDetail(null);
     setSelectedActivityError(null);
@@ -501,13 +533,53 @@ export default function MinisterioDashboard() {
     const requesterWallet = requestResult.status === "fulfilled" && requestResult.value.data
       ? requestResult.value.data.wallet
       : extractRequesterFromEvents(events);
+    let requesterPerson: Person | null = null;
     if (requesterWallet) {
       try {
         const requester = await api.getPerson(requesterWallet);
+        requesterPerson = requester.data;
         setSelectedActivityRequester(requester.data);
       } catch {
         setSelectedActivityRequester(null);
       }
+    }
+
+    const isGraduateFlowAction = ["ApproveLocal", "RejectRequest", "DeriveCancilleria"].includes(entry.accion);
+    const isTokenFlowAction = ["ApproveTokenRequest", "RejectTokenRequest"].includes(entry.accion);
+
+    if (isGraduateFlowAction) {
+      setSelectedActivityUniversity(
+        firstNonEmpty(
+          requestResult.status === "fulfilled" ? requestResult.value.data?.titulo_institucion : null,
+          requesterPerson?.role_data,
+          requestResult.status === "fulfilled" ? requestResult.value.data?.titulo_pais : null
+        )
+      );
+    } else if (isTokenFlowAction) {
+      const universityWallet = extractUniversityFromEvents(events);
+      let universityName = firstNonEmpty(requesterPerson?.role_data);
+
+      if (!universityName && universityWallet) {
+        try {
+          const universityPerson = (await api.getPerson(universityWallet)).data;
+          universityName = firstNonEmpty(universityPerson?.role_data);
+        } catch {
+          universityName = null;
+        }
+      }
+
+      if (!universityName && universityWallet) {
+        try {
+          universityName = await fetchPersonRoleDataOnChain({
+            connection,
+            wallet: new PublicKey(universityWallet),
+          });
+        } catch {
+          universityName = null;
+        }
+      }
+
+      setSelectedActivityUniversity(firstNonEmpty(universityName, universityWallet));
     }
 
     if (txResult.status === "rejected" && actorResult.status === "rejected") {
@@ -1298,6 +1370,7 @@ export default function MinisterioDashboard() {
           events={selectedActivityEvents}
           actor={selectedActivityActor}
           requester={selectedActivityRequester}
+          university={selectedActivityUniversity}
           request={selectedActivityRequest}
           tokenDetail={selectedActivityTokenDetail}
           loading={selectedActivityLoading}
@@ -1307,6 +1380,7 @@ export default function MinisterioDashboard() {
             setSelectedActivityEvents([]);
             setSelectedActivityActor(null);
             setSelectedActivityRequester(null);
+            setSelectedActivityUniversity(null);
             setSelectedActivityRequest(null);
             setSelectedActivityTokenDetail(null);
             setSelectedActivityLoading(false);
@@ -1446,6 +1520,15 @@ function extractRequesterFromEvents(events: EventRow[]): string | null {
   return null;
 }
 
+function extractUniversityFromEvents(events: EventRow[]): string | null {
+  for (const ev of events) {
+    const d = parseEventData(ev);
+    const raw = d.universidad ?? d.university ?? d.institution;
+    if (typeof raw === "string" && raw.length > 0) return raw;
+  }
+  return null;
+}
+
 function extractRejectReason(entry: AuditEntry, events: EventRow[]): string | null {
   if (entry.motivo && entry.motivo.trim().length > 0) return entry.motivo;
   for (const ev of events) {
@@ -1461,6 +1544,7 @@ function ActivityDetailModal({
   events,
   actor,
   requester,
+  university,
   request,
   tokenDetail,
   loading,
@@ -1471,6 +1555,7 @@ function ActivityDetailModal({
   events: EventRow[];
   actor: Person | null;
   requester: Person | null;
+  university: string | null;
   request: GraduateRequest | null;
   tokenDetail: {
     carrera: string | null;
@@ -1516,7 +1601,7 @@ function ActivityDetailModal({
                 <p className="break-all"><strong>Wallet actor:</strong> {entry.actor}</p>
                 <p><strong>Titular solicitud:</strong> {requester?.nombre ?? "-"} {requester?.apellido ?? ""}</p>
                 <p className="break-all"><strong>Wallet titular:</strong> {requester?.wallet ?? "-"}</p>
-                <p><strong>Universidad / institución:</strong> {request?.titulo_institucion ?? requester?.role_data ?? "-"}</p>
+                <p><strong>Universidad / institución:</strong> {university ?? request?.titulo_institucion ?? requester?.role_data ?? "-"}</p>
                 <p><strong>Título:</strong> {request?.titulo_nombre ?? "-"}</p>
                 <p><strong>País del título:</strong> {request?.titulo_pais ?? request?.pais ?? "-"}</p>
                 <p className="break-all"><strong>Entidad (PDA):</strong> {entry.entidad}</p>

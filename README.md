@@ -81,6 +81,26 @@ cd indexer && npm run dev
 4. Verificacion publica por pubkey e identidad.
 5. Consulta de actividad y auditoria por transaccion.
 
+## Certificaciones de Prueba para Evaluación
+
+A continuación se presentan certificaciones válidas y activas que pueden ser verificadas para evaluar la funcionalidad del sistema:
+
+| Nombre | Carrera | Año Egreso | Pubkey | Verificar |
+|--------|---------|-----------|--------|-----------|
+| Marta Sanchez | Ingeniería Informática | 2019 | `3ZrajfnbjkCx3bpHBTe6EBJdLC97P9aodEwje7SeKMRJ` | [Ver](http://localhost:3000/verify/3ZrajfnbjkCx3bpHBTe6EBJdLC97P9aodEwje7SeKMRJ) |
+| Omar Ibarra | Licenciado en Ciencia de Datos | 2025 | `4atfyraA2JJgaQayW3kX8f9LLU9xEfbH7LNJSfLCj7pu` | [Ver](http://localhost:3000/verify/4atfyraA2JJgaQayW3kX8f9LLU9xEfbH7LNJSfLCj7pu) |
+| Lautaro Metz | Analista Universitario en Seguridad del Trabajo | 2025 | `4Z8YcsgsEQ4WqtHPgR8d8s6xDkWfqfL2ka6XptH1eQNn` | [Ver](http://localhost:3000/verify/4Z8YcsgsEQ4WqtHPgR8d8s6xDkWfqfL2ka6XptH1eQNn) |
+| Micaela Silvestri | Analista en Informática | 2024 | `2thS6zpu8NcZkFY4TfVjddRuYJeSGsLTSHeYf3c9njTH` | [Ver](http://localhost:3000/verify/2thS6zpu8NcZkFY4TfVjddRuYJeSGsLTSHeYf3c9njTH) |
+| Pedro Lorenzetti | Analista en Informática | 2024 | `4LFtQ2sFLG9sK3AXf81aUG4QEc99M6FXexJu3yxtECk8` | [Ver](http://localhost:3000/verify/4LFtQ2sFLG9sK3AXf81aUG4QEc99M6FXexJu3yxtECk8) |
+| Alejandro Arretea | Analista en Informática | 2024 | `2rNSLonDrg8myjwwSobDMMxbuU8kjHtdMSwMWL3thLqt` | [Ver](http://localhost:3000/verify/2rNSLonDrg8myjwwSobDMMxbuU8kjHtdMSwMWL3thLqt) |
+
+### Cómo Verificar
+1. **Vía URL**: Accede directamente a `http://localhost:3000/verify/{PUBKEY}` en tu navegador.
+2. **Desde el Dashboard**: Inicia sesión como cualquier rol y navega a la sección de certificaciones o verificación.
+3. **Búsqueda por Identidad**: Usa la página de verificación pública para buscar por nombre, apellido o DNI del egresado.
+
+Todas estas certificaciones tienen estado **Activa** y pueden ser verificadas en tiempo real contra la blockchain de Solana.
+
 ## Capturas de Pantalla
 Ver carpeta [screenshots](screenshots). Incluye la evidencia de deploy en Devnet en `06-sol-explorer-transaccion-devnet.png`.
 

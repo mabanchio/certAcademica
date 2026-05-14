@@ -21,6 +21,13 @@ function shortAddress(value: string): string {
   return `${value.slice(0, 4)}...${value.slice(-4)}`;
 }
 
+function firstNonEmptyText(...values: Array<string | null | undefined>): string {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim().length > 0) return value;
+  }
+  return "";
+}
+
 function roleContextLabel(role: RequestableRole): string {
   if (role === "Universidad") return "Universidad";
   if (role === "Cancilleria") return "Pais";
@@ -429,9 +436,13 @@ export default function AdminDashboard() {
     setEditMsg(null);
     setEditLoading(true);
     try {
-      const [personResult, onChainRoleDataResult] = await Promise.allSettled([
+      const [personResult, onChainRoleDataResult, onChainIdentityResult] = await Promise.allSettled([
         api.getPerson(wallet),
         fetchPersonRoleDataOnChain({
+          connection,
+          wallet: new PublicKey(wallet),
+        }),
+        fetchPersonIdentityOnChain({
           connection,
           wallet: new PublicKey(wallet),
         }),
@@ -444,14 +455,16 @@ export default function AdminDashboard() {
       const p = personResult.value.data;
       const roleDataFromChain =
         onChainRoleDataResult.status === "fulfilled" ? onChainRoleDataResult.value : null;
+      const identityFromChain =
+        onChainIdentityResult.status === "fulfilled" ? onChainIdentityResult.value : null;
       setEditTarget(p);
       setEditForm({
-        nombre: p.nombre ?? "",
-        apellido: p.apellido ?? "",
-        dni: p.dni ?? "",
+        nombre: firstNonEmptyText(p.nombre, identityFromChain?.nombre),
+        apellido: firstNonEmptyText(p.apellido, identityFromChain?.apellido),
+        dni: firstNonEmptyText(p.dni, identityFromChain?.dni),
         active: (p.status ?? "").toLowerCase() === "activo",
         roles: p.roles.filter((r): r is EditableRole => EDITABLE_ROLES.includes(r as EditableRole)),
-        roleData: roleDataFromChain ?? p.role_data ?? "",
+        roleData: firstNonEmptyText(roleDataFromChain, p.role_data),
         motivo: "Actualización de datos por admin",
       });
     } catch (e) {

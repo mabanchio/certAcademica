@@ -428,12 +428,13 @@ function TabSolicitudes({ requests, connection }: { requests: TokenRequest[]; co
 }
 
 // ── Tab: Mi Actividad ─────────────────────────────────────────────────────
-function TabActividad({ audit, tokenRequests, certs }: { audit: AuditEntry[]; tokenRequests: TokenRequest[]; certs: Certification[] }) {
+function TabActividad({ audit, tokenRequests, certs, connection }: { audit: AuditEntry[]; tokenRequests: TokenRequest[]; certs: Certification[]; connection: unknown }) {
   const [actionFilter, setActionFilter] = useState<"all" | "RequestTokens" | "MintToken" | "AssignToken">("all");
   const [search, setSearch] = useState("");
   const [selected, setSelected] = useState<AuditEntry | null>(null);
   const [txEvents, setTxEvents] = useState<EventRow[]>([]);
   const [certDetail, setCertDetail] = useState<Certification | null>(null);
+  const [selectedTokenOnChainDetail, setSelectedTokenOnChainDetail] = useState<TokenRequestOnChainDetail | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
 
   const filtered = useMemo(() => {
@@ -456,6 +457,7 @@ function TabActividad({ audit, tokenRequests, certs }: { audit: AuditEntry[]; to
     if (!selected) {
       setTxEvents([]);
       setCertDetail(null);
+      setSelectedTokenOnChainDetail(null);
       return;
     }
 
@@ -463,15 +465,22 @@ function TabActividad({ audit, tokenRequests, certs }: { audit: AuditEntry[]; to
     const loadDetail = async () => {
       setLoadingDetail(true);
       try {
-        const [eventsRes, certRes] = await Promise.all([
+        const [eventsRes, certRes, tokenReqOnChainRes] = await Promise.all([
           api.getTransactionBySignature(selected.signature).catch(() => ({ data: [] as EventRow[] })),
           selected.accion === "AssignToken"
             ? api.getCertification(selected.entidad).catch(() => ({ data: null as Certification | null }))
             : Promise.resolve({ data: null as Certification | null }),
+          selected.accion === "RequestTokens"
+            ? fetchTokenRequestDetailOnChain({
+                connection,
+                tokenRequest: new PublicKey(selected.entidad),
+              }).catch(() => null)
+            : Promise.resolve(null),
         ]);
         if (cancelled) return;
         setTxEvents(eventsRes.data);
         setCertDetail(certRes.data);
+        setSelectedTokenOnChainDetail(tokenReqOnChainRes);
       } finally {
         if (!cancelled) setLoadingDetail(false);
       }
@@ -481,7 +490,7 @@ function TabActividad({ audit, tokenRequests, certs }: { audit: AuditEntry[]; to
     return () => {
       cancelled = true;
     };
-  }, [selected]);
+  }, [selected, connection]);
 
   const parseEventData = (row: EventRow): Record<string, unknown> => {
     try {
@@ -508,6 +517,25 @@ function TabActividad({ audit, tokenRequests, certs }: { audit: AuditEntry[]; to
   const selectedRequest = selected?.accion === "RequestTokens"
     ? tokenRequests.find((r) => r.pubkey === selected.entidad) ?? null
     : null;
+  const selectedRequestMerged = selectedRequest
+    ? {
+        ...selectedRequest,
+        carrera: selectedRequest.carrera ?? selectedTokenOnChainDetail?.carrera ?? null,
+        plan: selectedRequest.plan ?? selectedTokenOnChainDetail?.plan ?? null,
+        resolucion: selectedRequest.resolucion ?? selectedTokenOnChainDetail?.resolucion ?? null,
+        anio_egreso: selectedRequest.anio_egreso ?? selectedTokenOnChainDetail?.anioEgreso ?? null,
+        cantidad: selectedRequest.cantidad ?? selectedTokenOnChainDetail?.cantidad ?? null,
+      }
+    : {
+        pubkey: selected?.entidad ?? null,
+        carrera: selectedTokenOnChainDetail?.carrera ?? null,
+        plan: selectedTokenOnChainDetail?.plan ?? null,
+        resolucion: selectedTokenOnChainDetail?.resolucion ?? null,
+        anio_egreso: selectedTokenOnChainDetail?.anioEgreso ?? null,
+        cantidad: selectedTokenOnChainDetail?.cantidad ?? null,
+        estado: null,
+        solicitante: null,
+      };
   const selectedCert = selected?.accion === "AssignToken"
     ? certs.find((c) => c.pubkey === selected.entidad) ?? certDetail
     : null;
@@ -533,13 +561,13 @@ function TabActividad({ audit, tokenRequests, certs }: { audit: AuditEntry[]; to
               {selected.accion === "RequestTokens" && (
                 <>
                   <DetailRow label="Tipo" value="Solicitud de tokens" />
-                  <DetailRow label="Carrera" value={selectedRequest?.carrera ?? val(findEvent("TokenRequestedEvent"), "carrera")} />
-                  <DetailRow label="Plan" value={selectedRequest?.plan ?? "—"} />
-                  <DetailRow label="Resolución" value={selectedRequest?.resolucion ?? "—"} />
-                  <DetailRow label="Año egreso" value={selectedRequest?.anio_egreso ?? "—"} />
-                  <DetailRow label="Cantidad" value={selectedRequest?.cantidad ?? val(findEvent("TokenRequestedEvent"), "cantidad") ?? "—"} />
-                  <DetailRow label="Estado" value={selectedRequest?.estado ?? "—"} />
-                  <DetailRow label="Wallet solicitante" value={<span className="font-mono text-xs break-all">{selectedRequest?.solicitante ?? val(findEvent("TokenRequestedEvent"), "solicitante") ?? "—"}</span>} />
+                  <DetailRow label="Carrera" value={selectedRequestMerged.carrera ?? val(findEvent("TokenRequestedEvent"), "carrera") ?? "—"} />
+                  <DetailRow label="Plan" value={selectedRequestMerged.plan ?? "—"} />
+                  <DetailRow label="Resolución" value={selectedRequestMerged.resolucion ?? "—"} />
+                  <DetailRow label="Año egreso" value={selectedRequestMerged.anio_egreso ?? "—"} />
+                  <DetailRow label="Cantidad" value={selectedRequestMerged.cantidad ?? val(findEvent("TokenRequestedEvent"), "cantidad") ?? "—"} />
+                  <DetailRow label="Estado" value={selectedRequestMerged.estado ?? "—"} />
+                  <DetailRow label="Wallet solicitante" value={<span className="font-mono text-xs break-all">{selectedRequestMerged.solicitante ?? val(findEvent("TokenRequestedEvent"), "solicitante") ?? "—"}</span>} />
                 </>
               )}
 
@@ -1261,7 +1289,7 @@ export default function UniversidadDashboard() {
               onAssignedLocal={handleAssignedLocal}
             />
           )}
-          {tab === "actividad" && <TabActividad audit={audit} tokenRequests={tokenRequests} certs={certs} />}
+          {tab === "actividad" && <TabActividad audit={audit} tokenRequests={tokenRequests} certs={certs} connection={connection} />}
         </div>
       )}
     </div>

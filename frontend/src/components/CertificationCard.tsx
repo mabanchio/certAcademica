@@ -1,4 +1,7 @@
-import type { Certification } from "@/lib/api";
+"use client";
+
+import { useEffect, useState } from "react";
+import { api, type Certification } from "@/lib/api";
 import { StatusChip } from "./StatusChip";
 import { QRCodeDisplay } from "./QRCode";
 
@@ -9,6 +12,29 @@ interface Props {
 }
 
 export function CertificationCard({ cert, showQR = false, showDni = false }: Props) {
+  const [emisorNombre, setEmisorNombre] = useState<string | null>(null);
+  const [emisorLoading, setEmisorLoading] = useState(false);
+
+  useEffect(() => {
+    if (!cert.universidad) return;
+    
+    setEmisorLoading(true);
+    api
+      .getPerson(cert.universidad)
+      .then((res) => {
+        const p = res.data;
+        // Priorizar role_data (ministerio/institución), luego nombre, luego wallet
+        const nombre = (p.role_data && p.role_data.trim()) || 
+                       (p.nombre && p.apellido ? `${p.nombre} ${p.apellido}` : p.nombre) || 
+                       cert.universidad.slice(0, 8);
+        setEmisorNombre(nombre);
+      })
+      .catch(() => {
+        setEmisorNombre(cert.universidad.slice(0, 8));
+      })
+      .finally(() => setEmisorLoading(false));
+  }, [cert.universidad]);
+
   const verifyUrl = `${typeof window !== "undefined" ? window.location.origin : ""}/verify/${cert.pubkey}`;
 
   return (
@@ -30,8 +56,8 @@ export function CertificationCard({ cert, showQR = false, showDni = false }: Pro
           </p>
         )}
         <p>
-          <span className="font-medium text-gray-700">Universidad:</span>{" "}
-          {cert.universidad ? `${cert.universidad.slice(0, 8)}…` : "—"}
+          <span className="font-medium text-gray-700">Emisor:</span>{" "}
+          {emisorLoading ? "Cargando..." : emisorNombre || "—"}
         </p>
         {cert.anio_egreso && (
           <p>
