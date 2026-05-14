@@ -92,7 +92,7 @@ PENDIENTE: agregar enlace cuando se grabe.
 
 ```markdown
 ## Video Demostracion
-🎥 [Ver demostracion][https://youtu.be/xzbMdvabSyE])
+🎥 [![CertAcademica Demo](https://img.youtube.com/vi/xzbMdvabSyE/maxresdefault.jpg)](https://youtu.be/xzbMdvabSyE)
 ```
 
 ## Innovaciones Implementadas
