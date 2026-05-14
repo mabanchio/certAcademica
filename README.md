@@ -89,8 +89,6 @@ Ver [docs/diagramas.md](docs/diagramas.md).
 
 ## Video Demostracion
 
-## 🎬 Video Demo
-
 <p align="center">
   <a href="https://youtu.be/xzbMdvabSyE">
     <img src="https://img.youtube.com/vi/xzbMdvabSyE/hqdefault.jpg" 
@@ -102,7 +100,7 @@ Ver [docs/diagramas.md](docs/diagramas.md).
 <p align="center">
   Presentación oficial del Trabajo Final de Máster — CertAcademica
 </p>
-```
+
 
 ## Innovaciones Implementadas
 - Emision y asignacion de certificacion extranjera en una sola firma.
