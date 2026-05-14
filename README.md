@@ -88,9 +88,7 @@ Ver carpeta [screenshots](screenshots). Incluye la evidencia de deploy en Devnet
 Ver [docs/diagramas.md](docs/diagramas.md).
 
 ## Video Demostracion
-PENDIENTE: agregar enlace cuando se grabe.
 
-```markdown
 ## 🎬 Video Demo
 
 <p align="center">
