@@ -92,7 +92,11 @@ PENDIENTE: agregar enlace cuando se grabe.
 
 ```markdown
 ## Video Demostracion
-🎥 [![CertAcademica Demo](https://img.youtube.com/vi/xzbMdvabSyE/maxresdefault.jpg)](https://youtu.be/xzbMdvabSyE)
+## 🎬 Video Demo
+
+[![CertAcademica Demo](https://img.youtube.com/vi/xzbMdvabSyE/hqdefault.jpg)](https://youtu.be/xzbMdvabSyE)
+
+➡️ Click en la imagen para ver la demostración completa del proyecto CertAcademica.
 ```
 
 ## Innovaciones Implementadas
